@@ -46,6 +46,21 @@ struct MqttService::Impl {
         mosquitto_message_callback_set(client.get(), &Impl::onMessage);
         mosquitto_reconnect_delay_set(client.get(), 1, 8, true);
 
+        if (!config.mqtt.username.empty()) {
+            const char* username = config.mqtt.username.c_str();
+            const char* password = config.mqtt.password.empty() ? nullptr : config.mqtt.password.c_str();
+            int rc = mosquitto_username_pw_set(client.get(), username, password);
+            if (rc != MOSQ_ERR_SUCCESS) {
+                mosquitto_destroy(client.release());
+                mosquitto_lib_cleanup();
+                throw std::runtime_error(std::string("Failed to set MQTT credentials: ") + mosquitto_strerror(rc));
+            }
+        } else if (!config.mqtt.password.empty()) {
+            mosquitto_destroy(client.release());
+            mosquitto_lib_cleanup();
+            throw std::runtime_error("MQTT password provided without username");
+        }
+
         publish_topic = config.mqtt.publish_topic;
         if (publish_topic.empty()) {
             publish_topic = config.mqtt.subscribe_topic + std::string("/response");
@@ -152,7 +167,7 @@ struct MqttService::Impl {
 
         try {
             simplejson::JsonValue json = simplejson::parse(payload);
-            
+           
             if (json.isObject() && json.asObject().count("request_id")) {
                 try {
                     request_id = json.at("request_id").asString();
@@ -258,6 +273,16 @@ void MqttService::stop() {
     impl_->stop();
 #else
     (void)impl_;
+#endif
+}
+
+void MqttService::publish(simplejson::JsonValue value, const std::string& topic) {
+#ifdef APP_HAS_MOSQUITTO
+    impl_->publishJson(std::move(value), topic);
+#else
+    (void)value;
+    (void)topic;
+    throw std::runtime_error("MQTT support not available: libmosquitto not linked");
 #endif
 }
 

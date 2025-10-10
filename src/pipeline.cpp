@@ -220,17 +220,26 @@ void ProcessingPipeline::persistActiveScenarios() const {
 }
 
 void ProcessingPipeline::setActiveScenarios(const std::vector<std::string>& scenario_ids) {
-    for (auto& scenario : config_.scenarios) {
-        scenario.active = false;
-    }
+    std::vector<bool> desired(config_.scenarios.size(), false);
     for (const auto& id : scenario_ids) {
         auto it = config_.scenario_lookup.find(id);
-        if (it != config_.scenario_lookup.end() && it->second < config_.scenarios.size()) {
-            config_.scenarios[it->second].active = true;
+        if (it != config_.scenario_lookup.end() && it->second < desired.size()) {
+            desired[it->second] = true;
         }
     }
 
-    persistActiveScenarios();
+    bool changed = false;
+    for (std::size_t index = 0; index < config_.scenarios.size(); ++index) {
+        bool newState = index < desired.size() ? desired[index] : false;
+        if (config_.scenarios[index].active != newState) {
+            config_.scenarios[index].active = newState;
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        persistActiveScenarios();
+    }
 }
 
 std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) {

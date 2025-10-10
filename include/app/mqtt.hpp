@@ -23,6 +23,11 @@ public:
     // Requests the service to stop. Safe to call from any thread.
     void stop();
 
+    // Publishes a JSON payload to the broker using either the default publish
+    // topic or the supplied override. Safe to call from any thread while the
+    // service is running.
+    void publish(simplejson::JsonValue value, const std::string& topic = {});
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

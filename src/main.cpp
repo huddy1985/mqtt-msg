@@ -1,11 +1,19 @@
+
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <csignal>
+#include <condition_variable>
+#include <cctype>
+#include <cstdint>
 #include <fstream>
 #include <future>
 #include <iomanip>
 #include <ifaddrs.h>
 #include <iostream>
 #include <iterator>
+#include <memory>
+#include <mutex>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <sstream>
@@ -136,6 +144,51 @@ std::string currentIsoTimestamp() {
     oss << std::put_time(&tm, "%Y-%m-%dT%H:%M:%S");
     oss << '.' << std::setw(3) << std::setfill('0') << fractional.count() << "Z";
     return oss.str();
+}
+
+struct MonitoringSession {
+    std::vector<app::Command> commands;
+    std::string request_id;
+    std::string response_topic;
+};
+
+bool isAnomalousDetection(const app::DetectionResult& detection, double threshold) {
+    if (detection.filtered) {
+        return false;
+    }
+    if (detection.confidence < threshold) {
+        return false;
+    }
+    if (detection.label.empty()) {
+        return false;
+    }
+
+    std::string lowered;
+    lowered.reserve(detection.label.size());
+    for (char ch : detection.label) {
+        lowered.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+
+    if (lowered == "normal" || lowered == "background" || lowered == "ok") {
+        return false;
+    }
+    return true;
+}
+
+simplejson::JsonValue detectionToJson(const app::DetectionResult& detection) {
+    simplejson::JsonValue value = simplejson::makeObject();
+    auto& obj = value.asObject();
+    obj["label"] = detection.label;
+    simplejson::JsonValue region = simplejson::makeArray();
+    auto& arr = region.asArray();
+    arr.push_back(detection.region.x1);
+    arr.push_back(detection.region.y1);
+    arr.push_back(detection.region.x2);
+    arr.push_back(detection.region.y2);
+    obj["region"] = region;
+    obj["confidence"] = detection.confidence;
+    obj["filtered"] = detection.filtered;
+    return value;
 }
 
 }  // namespace
@@ -278,8 +331,23 @@ int main(int argc, char* argv[]) {
             return buildServiceSnapshot(effectiveConfig, localIp);
         };
 
-        auto processor = [&pipeline, &effectiveConfig](const simplejson::JsonValue& payload, std::string& responseTopic) {
+        std::mutex session_mutex;
+        std::condition_variable session_cv;
+        std::shared_ptr<MonitoringSession> active_session;
+        std::atomic<std::uint64_t> session_version{0};
+        std::atomic<bool> monitor_stop{false};
+
+        auto processor = [&pipeline,
+                          &effectiveConfig,
+                          &session_mutex,
+                          &session_cv,
+                          &active_session,
+                          &session_version](const simplejson::JsonValue& payload, std::string& responseTopic) {
             const simplejson::JsonValue* commandSource = &payload;
+            std::string requestId;
+            simplejson::JsonValue commandMetadata;
+            bool hasMetadata = false;
+
             if (payload.isObject()) {
                 const auto& obj = payload.asObject();
                 auto it = obj.find("response_topic");
@@ -294,21 +362,82 @@ int main(int argc, char* argv[]) {
                 if (cmdIt != obj.end()) {
                     commandSource = &cmdIt->second;
                 }
+                auto requestIt = obj.find("request_id");
+                if (requestIt != obj.end()) {
+                    try {
+                        requestId = requestIt->second.asString();
+                    } catch (const std::exception&) {
+                        requestId.clear();
+                    }
+                }
+                auto extraIt = obj.find("extra");
+                if (extraIt != obj.end()) {
+                    commandMetadata = extraIt->second;
+                    hasMetadata = true;
+                }
             }
 
             std::vector<app::Command> commands = app::parseCommandList(*commandSource);
+            if (commands.empty()) {
+                {
+                    std::lock_guard<std::mutex> lock(session_mutex);
+                    active_session.reset();
+                    session_version.fetch_add(1, std::memory_order_relaxed);
+                }
+                session_cv.notify_all();
+
+                simplejson::JsonValue response = simplejson::makeObject();
+                auto& root = response.asObject();
+                root["type"] = "analysis_result";
+                root["service_name"] = effectiveConfig.service.name;
+                root["timestamp"] = currentIsoTimestamp();
+                root["command_count"] = 0;
+                root["mode"] = "continuous";
+                root["status"] = "monitoring_stopped";
+                root["results"] = simplejson::makeArray();
+                if (!requestId.empty()) {
+                    root["request_id"] = requestId;
+                }
+                if (hasMetadata) {
+                    root["command_metadata"] = commandMetadata;
+                }
+                return response;
+            }
+
+            auto session = std::make_shared<MonitoringSession>();
+            session->commands = commands;
+            session->request_id = requestId;
+            session->response_topic = responseTopic;
+
+            {
+                std::lock_guard<std::mutex> lock(session_mutex);
+                active_session = session;
+                session_version.fetch_add(1, std::memory_order_relaxed);
+            }
+            session_cv.notify_all();
+
             simplejson::JsonValue response = simplejson::makeObject();
             auto& root = response.asObject();
             root["type"] = "analysis_result";
             root["service_name"] = effectiveConfig.service.name;
             root["timestamp"] = currentIsoTimestamp();
             root["command_count"] = static_cast<int>(commands.size());
+            root["mode"] = "continuous";
+            root["status"] = "monitoring_started";
+            root["results"] = simplejson::makeArray();
 
-            simplejson::JsonValue resultArray = simplejson::makeArray();
-            auto& commandArray = resultArray.asArray();
+            if (!requestId.empty()) {
+                root["request_id"] = requestId;
+            }
+            if (hasMetadata) {
+                root["command_metadata"] = commandMetadata;
+            }
+
+            simplejson::JsonValue commandArray = simplejson::makeArray();
+            auto& array = commandArray.asArray();
             for (const auto& command : commands) {
-                simplejson::JsonValue commandResult = simplejson::makeObject();
-                auto& commandObj = commandResult.asObject();
+                simplejson::JsonValue commandJson = simplejson::makeObject();
+                auto& commandObj = commandJson.asObject();
 
                 simplejson::JsonValue scenarioIds = simplejson::makeArray();
                 auto& scenarioArray = scenarioIds.asArray();
@@ -321,6 +450,7 @@ int main(int argc, char* argv[]) {
                 if (!command.activation_code.empty()) {
                     commandObj["activation_code"] = command.activation_code;
                 }
+
                 if (!command.detection_regions.empty()) {
                     simplejson::JsonValue regionsValue = simplejson::makeArray();
                     auto& regionsArray = regionsValue.asArray();
@@ -335,6 +465,7 @@ int main(int argc, char* argv[]) {
                     }
                     commandObj["detection_regions"] = regionsValue;
                 }
+
                 if (!command.filter_regions.empty()) {
                     simplejson::JsonValue regionsValue = simplejson::makeArray();
                     auto& regionsArray = regionsValue.asArray();
@@ -349,42 +480,136 @@ int main(int argc, char* argv[]) {
                     }
                     commandObj["filter_regions"] = regionsValue;
                 }
+
                 commandObj["extra"] = command.extra;
-
-                pipeline.setActiveScenarios(command.scenario_ids);
-
-                simplejson::JsonValue scenarioResults = simplejson::makeArray();
-                auto& scenarioResultsArray = scenarioResults.asArray();
-                auto analyses = pipeline.process(command);
-                for (const auto& analysis : analyses) {
-                    scenarioResultsArray.push_back(app::toJson(analysis));
-                }
-                commandObj["results"] = scenarioResults;
-
-                commandArray.push_back(commandResult);
-            }
-            root["results"] = resultArray;
-
-            if (payload.isObject()) {
-                const auto& obj = payload.asObject();
-                auto requestIt = obj.find("request_id");
-                if (requestIt != obj.end()) {
-                    try {
-                        root["request_id"] = requestIt->second.asString();
-                    } catch (const std::exception&) {
-                        // ignore conversion errors
-                    }
-                }
-                auto extraIt = obj.find("extra");
-                if (extraIt != obj.end()) {
-                    root["command_metadata"] = extraIt->second;
-                }
+                array.push_back(commandJson);
             }
 
+            root["commands"] = commandArray;
             return response;
         };
 
         app::MqttService service(effectiveConfig, processor, statusBuilder);
+
+        std::thread monitorThread([&]() {
+            try {
+                while (!monitor_stop.load()) {
+                    std::shared_ptr<MonitoringSession> session;
+                    std::uint64_t version = 0;
+                    {
+                        std::unique_lock<std::mutex> lock(session_mutex);
+                        session_cv.wait(lock, [&]() {
+                            return monitor_stop.load() || active_session != nullptr;
+                        });
+                        if (monitor_stop.load()) {
+                            break;
+                        }
+                        session = active_session;
+                        version = session_version.load();
+                    }
+
+                    if (!session) {
+                        continue;
+                    }
+
+                    while (!monitor_stop.load() && session_version.load() == version) {
+                        for (const auto& command : session->commands) {
+                            if (monitor_stop.load() || session_version.load() != version) {
+                                break;
+                            }
+                            if (command.scenario_ids.empty()) {
+                                continue;
+                            }
+
+                            pipeline.setActiveScenarios(command.scenario_ids);
+                            std::vector<app::AnalysisResult> analyses;
+                            try {
+                                analyses = pipeline.process(command);
+                            } catch (const std::exception& ex) {
+                                simplejson::JsonValue error = simplejson::makeObject();
+                                auto& obj = error.asObject();
+                                obj["type"] = "analysis_error";
+                                obj["service_name"] = effectiveConfig.service.name;
+                                obj["client_id"] = effectiveConfig.mqtt.client_id;
+                                obj["timestamp"] = currentIsoTimestamp();
+                                obj["error"] = ex.what();
+                                if (!session->request_id.empty()) {
+                                    obj["request_id"] = session->request_id;
+                                }
+                                try {
+                                    service.publish(error, session->response_topic);
+                                } catch (const std::exception& pubEx) {
+                                    std::cerr << "MQTT publish error: " << pubEx.what() << std::endl;
+                                }
+                                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                                continue;
+                            }
+
+                            for (const auto& analysis : analyses) {
+                                if (monitor_stop.load() || session_version.load() != version) {
+                                    break;
+                                }
+                                for (const auto& frame : analysis.frames) {
+                                    if (monitor_stop.load() || session_version.load() != version) {
+                                        break;
+                                    }
+
+                                    simplejson::JsonValue detectionArray = simplejson::makeArray();
+                                    auto& detectionVec = detectionArray.asArray();
+                                    for (const auto& detection : frame.detections) {
+                                        if (isAnomalousDetection(detection, command.threshold)) {
+                                            detectionVec.push_back(detectionToJson(detection));
+                                        }
+                                    }
+
+                                    if (detectionVec.empty()) {
+                                        continue;
+                                    }
+
+                                    simplejson::JsonValue frameJson = simplejson::makeObject();
+                                    auto& frameObj = frameJson.asObject();
+                                    frameObj["timestamp"] = frame.timestamp;
+                                    if (!frame.image_path.empty()) {
+                                        frameObj["image_path"] = frame.image_path;
+                                    }
+                                    frameObj["detections"] = detectionArray;
+
+                                    simplejson::JsonValue event = simplejson::makeObject();
+                                    auto& eventObj = event.asObject();
+                                    eventObj["type"] = "analysis_anomaly";
+                                    eventObj["timestamp"] = currentIsoTimestamp();
+                                    eventObj["service_name"] = effectiveConfig.service.name;
+                                    eventObj["client_id"] = effectiveConfig.mqtt.client_id;
+                                    eventObj["scenario_id"] = analysis.scenario_id;
+                                    simplejson::JsonValue modelJson = simplejson::makeObject();
+                                    auto& modelObj = modelJson.asObject();
+                                    modelObj["id"] = analysis.model.id;
+                                    modelObj["type"] = analysis.model.type;
+                                    modelObj["path"] = analysis.model.path;
+                                    eventObj["model"] = modelJson;
+                                    eventObj["frame"] = frameJson;
+                                    eventObj["threshold"] = command.threshold;
+                                    if (!session->request_id.empty()) {
+                                        eventObj["request_id"] = session->request_id;
+                                    }
+                                    if (command.fps > 0.0) {
+                                        eventObj["fps"] = command.fps;
+                                    }
+
+                                    try {
+                                        service.publish(event, session->response_topic);
+                                    } catch (const std::exception& ex) {
+                                        std::cerr << "MQTT publish error: " << ex.what() << std::endl;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (const std::exception& ex) {
+                std::cerr << "Monitoring loop error: " << ex.what() << std::endl;
+            }
+        });
 
         std::promise<void> runPromise;
         std::future<void> runFuture = runPromise.get_future();
@@ -412,6 +637,12 @@ int main(int argc, char* argv[]) {
 
         if (gSignalStatus != 0) {
             service.stop();
+        }
+
+        monitor_stop.store(true);
+        session_cv.notify_all();
+        if (monitorThread.joinable()) {
+            monitorThread.join();
         }
 
         worker.join();

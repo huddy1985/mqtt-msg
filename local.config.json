@@ -3,7 +3,9 @@
     "client_id": "edge-analytics",
     "port": 1883,
     "publish_topic": "edge/results",
-    "server": "mqtt://120.27.239.25",
+    "server": "mqtt.example.com",
+    "username": "edge-user",
+    "password": "edge-pass",
     "subscribe_topic": "edge/commands"
   },
   "rtsp": {

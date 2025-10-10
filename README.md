@@ -59,6 +59,8 @@ cmake --build build
     "server": "127.0.0.1",
     "port": 1883,
     "client_id": "mqtt-msg-service",
+    "username": "edge-user",
+    "password": "edge-pass",
     "subscribe_topic": "analysis/commands",
     "publish_topic": "analysis/results"
   },
@@ -96,8 +98,11 @@ cmake --build build
 }
 ```
 
+- `mqtt.username` / `mqtt.password`：可选的连接凭证，若配置则在连接前调用
+  libmosquitto 的 `mosquitto_username_pw_set` 完成鉴权。仅填写密码时会视为配
+  置错误并在启动时抛出异常。
 - `mqtt.subscribe_topic`：服务订阅命令的主题。命令报文可携带 `commands`
-  数组或单个命令对象，支持可选字段 `response_topic`、`request_id`、`extra`。  
+  数组或单个命令对象，支持可选字段 `response_topic`、`request_id`、`extra`。
 - `mqtt.publish_topic`：分析结果与注册信息默认发布的主题，可被命令中的
   `response_topic` 覆盖。  
 - `rtsp`：抽帧所需的 RTSP 地址信息。  
@@ -136,6 +141,8 @@ cmake --build build
    - 根据命令中的场景标识刷新本地配置，仅激活需要执行的场景，并将激活状态回写 `local.config.json`；
    - 针对每个场景串行加载对应模型，调用 RTSP 拉流模块按频率抽帧，并将图片保存到 `captures/<service>/<scenario>` 目录；
    - 将抽帧结果送入 CNN 或 YOLO ONNX 模型推理；
+   - 在离线（`--oneshot`）模式下立即返回所有场景的完整 `analysis_result` 数组；
+   - 在后台服务模式下，先回复一条 `type=analysis_result`、`mode=continuous` 的确认消息，然后保持检测循环，只要某个场景的任意帧出现“未被过滤、置信度高于阈值、且标签不是 normal/background/ok”的结果，就立刻以 `type=analysis_anomaly` 的独立 MQTT 消息上报（每个异常帧发布一次）。
    - 汇总多场景结果，填充每个检测框的类别、坐标、置信度以及帧时间戳；
    - 以 `type=analysis_result` 消息发布到 `publish_topic`（或命令指定的响应主题）。
 
@@ -182,7 +189,7 @@ JSON
 }
 ```
 
-分析完成后，服务会发布：
+服务会先返回一条确认消息：
 
 ```json
 {
@@ -192,56 +199,52 @@ JSON
   "timestamp": "2024-04-16T12:34:56.123Z",
   "command_count": 1,
   "request_id": "cmd-001",
-  "results": [
+  "mode": "continuous",
+  "status": "monitoring_started",
+  "commands": [
     {
       "scenario_ids": ["steam_detection", "liquid_leak_detection"],
       "threshold": 0.7,
       "fps": 1,
       "activation_code": "ABC-123",
-      "results": [
-        {
-          "scenario_id": "steam_detection",
-          "model": {"id": "cnn_v1", "type": "cnn", "path": "models/cnn_v1.onnx"},
-          "frames": [
-            {
-              "timestamp": 0.0,
-              "image_path": "captures/factory-analytics/steam_detection/frame_000000.jpg",
-              "detections": [
-                {
-                  "label": "class_0",
-                  "region": [0, 0, 100, 100],
-                  "confidence": 0.92,
-                  "filtered": false
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "scenario_id": "liquid_leak_detection",
-          "model": {"id": "yolo11_liquid", "type": "yolo11", "path": "models/yolo11_traffic.onnx"},
-          "frames": [
-            {
-              "timestamp": 0.0,
-              "image_path": "captures/factory-analytics/liquid_leak_detection/frame_000000.jpg",
-              "detections": [
-                {
-                  "label": "leak",
-                  "region": [0, 0, 100, 100],
-                  "confidence": 0.87,
-                  "filtered": false
-                }
-              ]
-            }
-          ]
-        }
-      ]
+      "detection_regions": [[0, 0, 100, 100]],
+      "filter_regions": [],
+      "extra": {"notes": "demo"}
     }
-  ]
+  ],
+  "results": []
 }
 ```
 
-若推理流程出错，服务会返回 `type=analysis_error` 的报文并包含错误信息。
+后续每当检测到异常帧时，会立即推送单独的异常消息（一个异常帧一条）：
+
+```json
+{
+  "type": "analysis_anomaly",
+  "service_name": "factory-analytics",
+  "client_id": "mqtt-msg-service",
+  "timestamp": "2024-04-16T12:34:59.987Z",
+  "request_id": "cmd-001",
+  "scenario_id": "steam_detection",
+  "model": {"id": "cnn_v1", "type": "cnn", "path": "models/cnn_v1.onnx"},
+  "frame": {
+    "timestamp": 3.0,
+    "image_path": "captures/factory-analytics/steam_detection/frame_000003.jpg",
+    "detections": [
+      {
+        "label": "anomaly",
+        "region": [0, 0, 100, 100],
+        "confidence": 0.92,
+        "filtered": false
+      }
+    ]
+  },
+  "threshold": 0.7,
+  "fps": 1
+}
+```
+
+若希望停止检测，可发送空命令（`{"commands": []}` 或者命令数组为空），服务会返回 `status=monitoring_stopped` 的确认报文。运行过程中如发生推理异常，仍会按照以往约定发布 `type=analysis_error` 的错误消息，方便平台侧告警。
 
 ## 模型与推理
 

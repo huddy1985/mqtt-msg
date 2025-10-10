@@ -33,6 +33,8 @@ struct MqttConfig {
     std::string client_id;
     std::string subscribe_topic;
     std::string publish_topic;
+    std::string username;
+    std::string password;
 };
 
 struct ServiceInfo {
