@@ -1,5 +1,5 @@
 {
-  "id": "coal_powder_detection",
+  "scenario_id": "coal_powder_detection",
   "name": "Coal powder detection",
   "description": "Detects coal powder dispersion using a YOLOv11 object detector.",
   "model": {
@@ -7,6 +7,22 @@
     "type": "yolo11",
     "path": "models/yolo11_traffic.onnx"
   },
+  "detection_regions": [
+    [
+      0,
+      0,
+      1920,
+      1080
+    ]
+  ],
+  "filter_regions": [
+    [
+      100,
+      100,
+      400,
+      400
+    ]
+  ],
   "postprocessing": {
     "confidence_threshold": 0.35,
     "iou_threshold": 0.45

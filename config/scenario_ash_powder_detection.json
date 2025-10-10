@@ -1,5 +1,5 @@
 {
-  "id": "ash_powder_detection",
+  "scenario_id": "ash_powder_detection",
   "name": "Ash powder detection",
   "description": "Monitors airborne ash accumulation via YOLOv11 models.",
   "model": {
@@ -7,6 +7,22 @@
     "type": "yolo11",
     "path": "models/yolo11_traffic.onnx"
   },
+  "detection_regions": [
+    [
+      0,
+      0,
+      1920,
+      1080
+    ]
+  ],
+  "filter_regions": [
+    [
+      100,
+      100,
+      400,
+      400
+    ]
+  ],
   "postprocessing": {
     "confidence_threshold": 0.4,
     "iou_threshold": 0.5
