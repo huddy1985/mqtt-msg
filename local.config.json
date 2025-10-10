@@ -25,7 +25,7 @@
       "id": "coal_powder_detection"
     },
     {
-      "active": false,
+      "active": true,
       "config": "config/scenario_ash_powder_detection.json",
       "id": "ash_powder_detection"
     },

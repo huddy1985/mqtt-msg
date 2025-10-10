@@ -1,5 +1,5 @@
 {
-  "id": "steam_detection",
+  "scenario_id": "steam_detection",
   "name": "Steam plume detection",
   "description": "Identifies abnormal steam emissions using a CNN classifier.",
   "model": {
@@ -10,5 +10,32 @@
   "preprocessing": {
     "resize": [640, 480],
     "normalize": true
+  },
+  "detection_regions": [
+    [
+      0,
+      0,
+      1920,
+      1080
+    ]
+  ],
+  "filter_regions": [
+    [
+      100,
+      100,
+      400,
+      400
+    ]
+  ],
+  "preprocessing": {
+    "resize": [
+      640,
+      480
+    ],
+    "normalize": true
+  },
+  "postprocessing": {
+    "confidence_threshold": 0.3,
+    "iou_threshold": 0.4
   }
 }
