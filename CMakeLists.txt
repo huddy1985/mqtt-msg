@@ -62,6 +62,9 @@ if (NOT MOSQUITTO_FOUND)
     endif()
 endif()
 
+find_package(Threads REQUIRED)
+target_link_libraries(mqtt_msg PRIVATE Threads::Threads)
+
 if (MOSQUITTO_FOUND)
     target_compile_definitions(mqtt_msg PRIVATE APP_HAS_MOSQUITTO)
     target_include_directories(mqtt_msg PRIVATE ${MOSQUITTO_INCLUDE_DIRS})

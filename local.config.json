@@ -3,7 +3,7 @@
     "client_id": "edge-analytics",
     "port": 1883,
     "publish_topic": "edge/results",
-    "server": "mqtt.example.com",
+    "server": "mqtt://120.27.239.25",
     "subscribe_topic": "edge/commands"
   },
   "rtsp": {
@@ -23,7 +23,7 @@
       "id": "coal_powder_detection"
     },
     {
-      "active": false,
+      "active": true,
       "config": "config/scenario_ash_powder_detection.json",
       "id": "ash_powder_detection"
     },
