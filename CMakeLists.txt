@@ -13,6 +13,7 @@ add_executable(mqtt_msg
     src/rtsp.cpp
     src/cnn.cpp
     src/yolo.cpp
+    src/mqtt.cpp
 )
 
 target_include_directories(mqtt_msg PRIVATE include)
@@ -38,5 +39,32 @@ if (ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIBRARY)
     target_compile_definitions(mqtt_msg PRIVATE APP_HAS_ONNXRUNTIME)
     target_include_directories(mqtt_msg PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
     target_link_libraries(mqtt_msg PRIVATE ${ONNXRUNTIME_LIBRARY})
+endif()
+
+find_package(PkgConfig QUIET)
+if (PKG_CONFIG_FOUND)
+    pkg_check_modules(MOSQUITTO QUIET libmosquitto)
+endif()
+
+if (NOT MOSQUITTO_FOUND)
+    find_path(MOSQUITTO_INCLUDE_DIR
+        NAMES mosquitto.h
+        HINTS $ENV{MOSQUITTO_ROOT} $ENV{MOSQUITTO_DIR}
+        PATH_SUFFIXES include)
+    find_library(MOSQUITTO_LIBRARY
+        NAMES mosquitto
+        HINTS $ENV{MOSQUITTO_ROOT} $ENV{MOSQUITTO_DIR}
+        PATH_SUFFIXES lib lib64)
+    if (MOSQUITTO_INCLUDE_DIR AND MOSQUITTO_LIBRARY)
+        set(MOSQUITTO_FOUND ON)
+        set(MOSQUITTO_INCLUDE_DIRS ${MOSQUITTO_INCLUDE_DIR})
+        set(MOSQUITTO_LIBRARIES ${MOSQUITTO_LIBRARY})
+    endif()
+endif()
+
+if (MOSQUITTO_FOUND)
+    target_compile_definitions(mqtt_msg PRIVATE APP_HAS_MOSQUITTO)
+    target_include_directories(mqtt_msg PRIVATE ${MOSQUITTO_INCLUDE_DIRS})
+    target_link_libraries(mqtt_msg PRIVATE ${MOSQUITTO_LIBRARIES})
 endif()
 

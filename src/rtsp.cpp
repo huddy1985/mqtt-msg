@@ -1,6 +1,7 @@
 #include "app/rtsp.hpp"
 
 #include <array>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -48,15 +49,14 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
     command << "-vframes " << max_frames << ' ';
     command << "-vcodec mjpeg -f image2pipe - 2>/dev/null";
 
-    struct PipeCloser {
-        void operator()(FILE* f) const {
-            if (f) {
-                pclose(f);
-            }
+    int exitStatus = 0;
+    auto closer = [&exitStatus](FILE* f) {
+        if (f) {
+            exitStatus = pclose(f);
         }
     };
 
-    std::unique_ptr<FILE, PipeCloser> pipe(popen(command.str().c_str(), "r"), PipeCloser{});
+    std::unique_ptr<FILE, decltype(closer)> pipe(popen(command.str().c_str(), "r"), closer);
     if (!pipe) {
         throw std::runtime_error("Failed to execute ffmpeg for RTSP capture");
     }
@@ -72,6 +72,8 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
     bool havePrevious = false;
     bool capturing = false;
     std::size_t frameIndex = 0;
+    auto startTime = std::chrono::steady_clock::now();
+    bool enforceTimeout = timeout.count() > 0;
 
     auto finalizeFrame = [&](bool force) {
         if (!capturing && frameBuffer.empty()) {
@@ -94,6 +96,12 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
     while (frameIndex < max_frames) {
         std::size_t bytesRead = std::fread(buffer.data(), 1, buffer.size(), pipe.get());
         if (bytesRead == 0) {
+            if (std::feof(pipe.get())) {
+                break;
+            }
+            if (std::ferror(pipe.get())) {
+                throw std::runtime_error("Error while reading RTSP frame data");
+            }
             break;
         }
 
@@ -123,9 +131,28 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
                 frameBuffer[0] = previous;
             }
         }
+
+        if (enforceTimeout) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime);
+            if (elapsed > timeout + std::chrono::milliseconds(200)) {
+                break;
+            }
+        }
     }
 
     finalizeFrame(true);
+
+    pipe.reset();
+
+    if (frames.empty()) {
+        throw std::runtime_error("RTSP capture produced no frames");
+    }
+
+    if (exitStatus != 0) {
+        std::ostringstream error;
+        error << "ffmpeg exited with status " << exitStatus;
+        throw std::runtime_error(error.str());
+    }
 
     return frames;
 }
