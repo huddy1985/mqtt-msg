@@ -46,6 +46,21 @@ struct MqttService::Impl {
         mosquitto_message_callback_set(client.get(), &Impl::onMessage);
         mosquitto_reconnect_delay_set(client.get(), 1, 8, true);
 
+        if (!config.mqtt.username.empty()) {
+            const char* username = config.mqtt.username.c_str();
+            const char* password = config.mqtt.password.empty() ? nullptr : config.mqtt.password.c_str();
+            int rc = mosquitto_username_pw_set(client.get(), username, password);
+            if (rc != MOSQ_ERR_SUCCESS) {
+                mosquitto_destroy(client.release());
+                mosquitto_lib_cleanup();
+                throw std::runtime_error(std::string("Failed to set MQTT credentials: ") + mosquitto_strerror(rc));
+            }
+        } else if (!config.mqtt.password.empty()) {
+            mosquitto_destroy(client.release());
+            mosquitto_lib_cleanup();
+            throw std::runtime_error("MQTT password provided without username");
+        }
+
         publish_topic = config.mqtt.publish_topic;
         if (publish_topic.empty()) {
             publish_topic = config.mqtt.subscribe_topic + std::string("/response");

@@ -85,6 +85,8 @@ AppConfig loadConfig(const std::string& path) {
     config.mqtt.client_id = mqtt.getString("client_id");
     config.mqtt.subscribe_topic = mqtt.getString("subscribe_topic");
     config.mqtt.publish_topic = mqtt.getString("publish_topic");
+    config.mqtt.username = mqtt.getString("username");
+    config.mqtt.password = mqtt.getString("password");
 
     if (!root.contains("rtsp")) {
         throw std::runtime_error("Configuration missing 'rtsp' section");

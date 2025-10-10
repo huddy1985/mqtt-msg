@@ -59,6 +59,8 @@ cmake --build build
     "server": "127.0.0.1",
     "port": 1883,
     "client_id": "mqtt-msg-service",
+    "username": "edge-user",
+    "password": "edge-pass",
     "subscribe_topic": "analysis/commands",
     "publish_topic": "analysis/results"
   },
@@ -96,8 +98,11 @@ cmake --build build
 }
 ```
 
+- `mqtt.username` / `mqtt.password`：可选的连接凭证，若配置则在连接前调用
+  libmosquitto 的 `mosquitto_username_pw_set` 完成鉴权。仅填写密码时会视为配
+  置错误并在启动时抛出异常。
 - `mqtt.subscribe_topic`：服务订阅命令的主题。命令报文可携带 `commands`
-  数组或单个命令对象，支持可选字段 `response_topic`、`request_id`、`extra`。  
+  数组或单个命令对象，支持可选字段 `response_topic`、`request_id`、`extra`。
 - `mqtt.publish_topic`：分析结果与注册信息默认发布的主题，可被命令中的
   `response_topic` 覆盖。  
 - `rtsp`：抽帧所需的 RTSP 地址信息。  
