@@ -11,7 +11,15 @@ add_executable(mqtt_msg
     src/command.cpp
     src/pipeline.cpp
     src/rtsp.cpp
+    src/cnn.cpp
 )
 
 target_include_directories(mqtt_msg PRIVATE include)
+
+find_package(Torch QUIET)
+if (Torch_FOUND)
+    target_compile_definitions(mqtt_msg PRIVATE APP_HAS_TORCH)
+    target_include_directories(mqtt_msg PRIVATE ${TORCH_INCLUDE_DIRS})
+    target_link_libraries(mqtt_msg PRIVATE ${TORCH_LIBRARIES})
+endif()
 

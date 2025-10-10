@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -12,6 +13,8 @@
 #include <system_error>
 #include <utility>
 #include <vector>
+
+#include "app/cnn.hpp"
 
 namespace app {
 namespace {
@@ -160,7 +163,21 @@ AnalysisResult ProcessingPipeline::process(const Command& command) const {
         regions.push_back(Region{0, 0, 0, 0});
     }
 
+    bool useCnn = (result.model.type == "cnn");
     std::size_t frameCount = regions.size();
+
+    std::unique_ptr<CnnModel> cnnModel;
+    if (useCnn) {
+        try {
+            cnnModel = std::make_unique<CnnModel>(result.model.path);
+        } catch (const std::exception& ex) {
+            std::cerr << "CNN model load failed: " << ex.what() << "\n";
+        }
+        if (!frameCount) {
+            frameCount = 1;
+        }
+    }
+
     std::vector<CapturedFrame> capturedFrames;
     try {
         capturedFrames = frame_grabber_.capture(fps, frameCount, std::chrono::milliseconds(5000));
@@ -171,10 +188,6 @@ AnalysisResult ProcessingPipeline::process(const Command& command) const {
     std::filesystem::path captureDir = ensureCaptureDirectory(config_.service.name);
 
     for (std::size_t index = 0; index < frameCount; ++index) {
-        const auto& region = regions[index];
-        bool filtered = isFiltered(region, command.filter_regions);
-        DetectionResult detection = makeDetection(region, result.model, command.threshold, filtered);
-
         FrameResult frame;
         if (index < capturedFrames.size()) {
             frame.timestamp = capturedFrames[index].timestamp;
@@ -183,8 +196,47 @@ AnalysisResult ProcessingPipeline::process(const Command& command) const {
         } else {
             frame.timestamp = index * interval;
         }
-        frame.detections.push_back(detection);
-        result.frames.push_back(frame);
+
+        if (useCnn && cnnModel && cnnModel->isLoaded()) {
+            const CapturedFrame* frameData = (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
+            CapturedFrame synthetic;
+            if (!frameData) {
+                synthetic.timestamp = frame.timestamp;
+                synthetic.format = "synthetic";
+                synthetic.data.reserve(regions.size() * 4 + command.scenario_id.size());
+                for (const auto& region : regions) {
+                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x1 + region.y1) & 0xFF));
+                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x2 + region.y2) & 0xFF));
+                }
+                for (char ch : command.scenario_id) {
+                    synthetic.data.push_back(static_cast<std::uint8_t>(ch));
+                }
+                frameData = &synthetic;
+            }
+
+            auto predictions = cnnModel->infer(*frameData);
+            if (predictions.empty()) {
+                predictions.push_back(CnnPrediction{"unknown", 0.0});
+            }
+
+            for (std::size_t detIndex = 0; detIndex < predictions.size(); ++detIndex) {
+                Region region = detIndex < regions.size() ? regions[detIndex] : Region{0, 0, 0, 0};
+                bool filtered = isFiltered(region, command.filter_regions);
+                DetectionResult detection;
+                detection.region = region;
+                detection.filtered = filtered;
+                detection.label = predictions[detIndex].label;
+                detection.confidence = predictions[detIndex].confidence;
+                frame.detections.push_back(std::move(detection));
+            }
+        } else {
+            const auto& region = regions[index % regions.size()];
+            bool filtered = isFiltered(region, command.filter_regions);
+            DetectionResult detection = makeDetection(region, result.model, command.threshold, filtered);
+            frame.detections.push_back(detection);
+        }
+
+        result.frames.push_back(std::move(frame));
     }
 
     return result;

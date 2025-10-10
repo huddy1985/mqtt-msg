@@ -1,16 +1,13 @@
 {
-  "scenario_id": "traffic_junction",
+  "scenario_id": "factory_floor",
   "detection_regions": [
-    [10, 10, 120, 160],
-    [200, 50, 320, 200]
+    [0, 0, 0, 0]
   ],
-  "filter_regions": [
-    [200, 50, 320, 200]
-  ],
+  "filter_regions": [],
   "threshold": 0.6,
-  "fps": 2,
+  "fps": 1,
   "activation_code": "ABC-123",
   "extra": {
-    "notes": "High traffic lane"
+    "notes": "Demo request for CNN classification"
   }
 }

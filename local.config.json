@@ -21,7 +21,7 @@
       "model": {
         "id": "cnn_v1",
         "type": "cnn",
-        "path": "models/cnn_v1.bin"
+        "path": "models/cnn_v1.pt"
       }
     },
     {
