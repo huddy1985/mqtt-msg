@@ -143,6 +143,8 @@ cmake --build build
    - 将抽帧结果送入 CNN 或 YOLO ONNX 模型推理；
    - 在离线（`--oneshot`）模式下立即返回所有场景的完整 `analysis_result` 数组；
    - 在后台服务模式下，先回复一条 `type=analysis_result`、`mode=continuous` 的确认消息，然后保持检测循环，只要某个场景的任意帧出现“未被过滤、置信度高于阈值、且标签不是 normal/background/ok”的结果，就立刻以 `type=analysis_anomaly` 的独立 MQTT 消息上报（每个异常帧发布一次）。
+   - 汇总多场景结果，填充每个检测框的类别、坐标、置信度以及帧时间戳；
+   - 以 `type=analysis_result` 消息发布到 `publish_topic`（或命令指定的响应主题）。
 
 服务可通过 `Ctrl+C`、`SIGTERM` 等信号安全停止，信号会触发 MQTT 断连并退出循环。
 

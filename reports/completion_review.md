@@ -22,6 +22,7 @@
 - **结论：已实现**
 - **依据：** `MqttService` 在连接成功后发布注册状态，支持凭证登录，并暴露线程安全的 `publish` 接口供监控线程发送实时异常；命令响应既会返回确认信息，也会将后续的 `analysis_anomaly` 或 `analysis_error` 消息发布到命令指定的响应主题或默认主题。 【F:src/mqtt.cpp†L28-L213】【F:src/main.cpp†L312-L438】
 
+
 ## 6. 配置管理
 - **结论：已实现**
 - **依据：** 配置解析严格校验 MQTT、RTSP、服务与场景字段，支持为每个场景加载独立的 `config/scenario_*.json` 文件，并维护激活状态的索引；流水线在接收命令时刷新激活场景并把状态写回 `local.config.json` 供后续查询。 【F:src/config.cpp†L12-L118】【F:src/pipeline.cpp†L152-L220】【F:local.config.json†L1-L31】

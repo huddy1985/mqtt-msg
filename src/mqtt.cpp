@@ -162,10 +162,12 @@ struct MqttService::Impl {
             return;
         }
         std::string payload(static_cast<const char*>(message->payload), static_cast<std::size_t>(message->payloadlen));
+        std::string response_topic;
+        std::string request_id;
+
         try {
             simplejson::JsonValue json = simplejson::parse(payload);
-            std::string response_topic;
-            std::string request_id;
+           
             if (json.isObject() && json.asObject().count("request_id")) {
                 try {
                     request_id = json.at("request_id").asString();
@@ -196,7 +198,7 @@ struct MqttService::Impl {
             }
             publishJson(response, response_topic);
         } catch (const std::exception& ex) {
-            publishError(ex.what());
+            publishError(ex.what(), request_id);
         }
     }
 
