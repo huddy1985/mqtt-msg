@@ -158,7 +158,82 @@ std::string saveFrameToDisk(const std::filesystem::path& directory,
 ProcessingPipeline::ProcessingPipeline(AppConfig config)
     : config_(std::move(config)), frame_grabber_(config_.rtsp) {}
 
-std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) const {
+const ScenarioConfig* ProcessingPipeline::findScenario(const std::string& scenario_id) const {
+    auto it = config_.scenario_lookup.find(scenario_id);
+    if (it == config_.scenario_lookup.end()) {
+        return nullptr;
+    }
+    std::size_t index = it->second;
+    if (index >= config_.scenarios.size()) {
+        return nullptr;
+    }
+    return &config_.scenarios[index];
+}
+
+void ProcessingPipeline::persistActiveScenarios() const {
+    if (config_.source_path.empty()) {
+        return;
+    }
+
+    try {
+        simplejson::JsonValue root = simplejson::parseFile(config_.source_path);
+        if (!root.isObject()) {
+            return;
+        }
+
+        auto& obj = root.asObject();
+        auto it = obj.find("scenarios");
+        if (it == obj.end()) {
+            return;
+        }
+
+        auto& scenarios = it->second.asArray();
+        for (auto& scenarioValue : scenarios) {
+            if (!scenarioValue.isObject()) {
+                continue;
+            }
+            auto& scenarioObj = scenarioValue.asObject();
+            auto idIt = scenarioObj.find("id");
+            if (idIt == scenarioObj.end()) {
+                continue;
+            }
+            std::string id = idIt->second.asString();
+            auto lookupIt = config_.scenario_lookup.find(id);
+            if (lookupIt == config_.scenario_lookup.end()) {
+                continue;
+            }
+            std::size_t index = lookupIt->second;
+            if (index >= config_.scenarios.size()) {
+                continue;
+            }
+            bool active = config_.scenarios[index].active;
+            scenarioObj["active"] = active;
+        }
+
+        std::ofstream output(config_.source_path);
+        if (output) {
+            output << root.dump(2);
+        }
+    } catch (const std::exception& ex) {
+        std::cerr << "Failed to persist scenario activation state: " << ex.what() << "\n";
+    }
+}
+
+void ProcessingPipeline::setActiveScenarios(const std::vector<std::string>& scenario_ids) {
+    for (auto& scenario : config_.scenarios) {
+        scenario.active = false;
+    }
+    for (const auto& id : scenario_ids) {
+        auto it = config_.scenario_lookup.find(id);
+        if (it != config_.scenario_lookup.end() && it->second < config_.scenarios.size()) {
+            config_.scenarios[it->second].active = true;
+        }
+    }
+
+    persistActiveScenarios();
+}
+
+std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) {
     if (command.scenario_ids.empty()) {
         throw std::runtime_error("Command must define at least one scenario");
     }
@@ -167,14 +242,19 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
     results.reserve(command.scenario_ids.size());
 
     for (const auto& scenarioId : command.scenario_ids) {
-        AnalysisResult result;
-        result.scenario_id = scenarioId;
-
-        auto modelIt = config_.scenario_lookup.find(scenarioId);
-        if (modelIt == config_.scenario_lookup.end()) {
+        const ScenarioConfig* scenarioConfig = findScenario(scenarioId);
+        if (!scenarioConfig) {
             throw std::runtime_error("Unknown scenario: " + scenarioId);
         }
-        result.model = modelIt->second;
+
+        if (!scenarioConfig->active) {
+            std::cerr << "Skipping inactive scenario: " << scenarioConfig->id << "\n";
+            continue;
+        }
+
+        AnalysisResult result;
+        result.scenario_id = scenarioConfig->id;
+        result.model = scenarioConfig->model;
 
         double fps = command.fps > 0.0 ? command.fps : 1.0;
         double interval = 1.0 / fps;
@@ -217,7 +297,7 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
             std::cerr << "RTSP capture failed: " << ex.what() << "\n";
         }
 
-        std::filesystem::path captureDir = ensureCaptureDirectory(config_.service.name, scenarioId);
+        std::filesystem::path captureDir = ensureCaptureDirectory(config_.service.name, scenarioConfig->id);
 
         for (std::size_t index = 0; index < frameCount; ++index) {
             FrameResult frame;
@@ -235,12 +315,12 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
                 if (!frameData) {
                     synthetic.timestamp = frame.timestamp;
                     synthetic.format = "synthetic";
-                    synthetic.data.reserve(regions.size() * 4 + scenarioId.size());
+                    synthetic.data.reserve(regions.size() * 4 + scenarioConfig->id.size());
                     for (const auto& region : regions) {
                         synthetic.data.push_back(static_cast<std::uint8_t>((region.x1 + region.y1) & 0xFF));
                         synthetic.data.push_back(static_cast<std::uint8_t>((region.x2 + region.y2) & 0xFF));
                     }
-                    for (char ch : scenarioId) {
+                    for (char ch : scenarioConfig->id) {
                         synthetic.data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
                     }
                     frameData = &synthetic;
@@ -267,12 +347,12 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
                 if (!frameData) {
                     synthetic.timestamp = frame.timestamp;
                     synthetic.format = "synthetic";
-                    synthetic.data.reserve(regions.size() * 4 + scenarioId.size());
+                    synthetic.data.reserve(regions.size() * 4 + scenarioConfig->id.size());
                     for (const auto& region : regions) {
                         synthetic.data.push_back(static_cast<std::uint8_t>((region.x1 ^ region.y2) & 0xFF));
                         synthetic.data.push_back(static_cast<std::uint8_t>((region.x2 ^ region.y1) & 0xFF));
                     }
-                    for (char ch : scenarioId) {
+                    for (char ch : scenarioConfig->id) {
                         synthetic.data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
                     }
                     frameData = &synthetic;

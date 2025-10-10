@@ -74,19 +74,23 @@ cmake --build build
   "scenarios": [
     {
       "id": "steam_detection",
-      "model": { "id": "cnn_v1", "type": "cnn", "path": "models/cnn_v1.onnx" }
+      "config": "config/scenario_steam_detection.json",
+      "active": false
     },
     {
       "id": "coal_powder_detection",
-      "model": { "id": "yolo11_coal", "type": "yolo11", "path": "models/yolo11_traffic.onnx" }
+      "config": "config/scenario_coal_powder_detection.json",
+      "active": false
     },
     {
       "id": "ash_powder_detection",
-      "model": { "id": "yolo11_ash", "type": "yolo11", "path": "models/yolo11_traffic.onnx" }
+      "config": "config/scenario_ash_powder_detection.json",
+      "active": false
     },
     {
       "id": "liquid_leak_detection",
-      "model": { "id": "yolo11_liquid", "type": "yolo11", "path": "models/yolo11_traffic.onnx" }
+      "config": "config/scenario_liquid_leak_detection.json",
+      "active": false
     }
   ]
 }
@@ -97,7 +101,22 @@ cmake --build build
 - `mqtt.publish_topic`：分析结果与注册信息默认发布的主题，可被命令中的
   `response_topic` 覆盖。  
 - `rtsp`：抽帧所需的 RTSP 地址信息。  
-- `scenarios`：场景与模型的映射。本文示例分别对应蒸汽、煤粉、灰粉与液体泄漏场景。模型类型以 `cnn` 或 `yolo` 开头决定加载逻辑。
+- `scenarios`：场景与模型的映射。每个场景引用 `config/` 目录下的独立配置文件，并通过 `active` 字段指示当前是否启用。本文示例分别对应蒸汽、煤粉、灰粉与液体泄漏场景，模型类型以 `cnn` 或 `yolo` 开头决定加载逻辑。
+
+每个场景配置文件都会描述模型路径及附加说明，例如 `config/scenario_steam_detection.json`：
+
+```json
+{
+  "id": "steam_detection",
+  "name": "Steam plume detection",
+  "description": "Identifies abnormal steam emissions using a CNN classifier.",
+  "model": {
+    "id": "cnn_v1",
+    "type": "cnn",
+    "path": "models/cnn_v1.onnx"
+  }
+}
+```
 
 ## 运行方式
 
@@ -114,6 +133,7 @@ cmake --build build
    本地 IP、订阅/发布主题及可用场景。  
 3. 订阅 `subscribe_topic`，收到命令后按顺序执行：
    - 解析命令内的场景数组、检测区域、过滤区域、阈值、帧率等参数；
+   - 根据命令中的场景标识刷新本地配置，仅激活需要执行的场景，并将激活状态回写 `local.config.json`；
    - 针对每个场景串行加载对应模型，调用 RTSP 拉流模块按频率抽帧，并将图片保存到 `captures/<service>/<scenario>` 目录；
    - 将抽帧结果送入 CNN 或 YOLO ONNX 模型推理；
    - 汇总多场景结果，填充每个检测框的类别、坐标、置信度以及帧时间戳；

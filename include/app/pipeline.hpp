@@ -34,11 +34,16 @@ class ProcessingPipeline {
 public:
     explicit ProcessingPipeline(AppConfig config);
 
-    std::vector<AnalysisResult> process(const Command& command) const;
+    void setActiveScenarios(const std::vector<std::string>& scenario_ids);
+
+    std::vector<AnalysisResult> process(const Command& command);
 
     const AppConfig& config() const { return config_; }
 
 private:
+    const ScenarioConfig* findScenario(const std::string& scenario_id) const;
+    void persistActiveScenarios() const;
+
     AppConfig config_;
     RtspFrameGrabber frame_grabber_;
 };

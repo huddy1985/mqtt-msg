@@ -24,7 +24,7 @@
 
 ## 6. 配置管理
 - **结论：已实现**
-- **依据：** 配置解析严格校验 MQTT、RTSP、服务与场景字段，构建场景到模型的查找表，缺失关键字段时立即抛出异常。 【F:src/config.cpp†L20-L61】
+- **依据：** 配置解析严格校验 MQTT、RTSP、服务与场景字段，支持为每个场景加载独立的 `config/scenario_*.json` 文件，并维护激活状态的索引；流水线在接收命令时刷新激活场景并把状态写回 `local.config.json` 供后续查询。 【F:src/config.cpp†L12-L118】【F:src/pipeline.cpp†L152-L220】【F:local.config.json†L1-L31】
 
 ## 综合结论
 当前代码已满足 `readme.txt` 中对后台服务的全部要求：能够注册 MQTT、接收并处理命令、按场景加载模型、通过 RTSP 拉流抽帧、完成推理并将结构化结果发布到 MQTT，同时提供占位回退以保证链路稳定。

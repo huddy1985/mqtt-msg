@@ -16,6 +16,8 @@ struct ModelInfo {
 
 struct ScenarioConfig {
     std::string id;
+    std::string config_path;
+    bool active = false;
     ModelInfo model;
 };
 
@@ -39,11 +41,12 @@ struct ServiceInfo {
 };
 
 struct AppConfig {
+    std::string source_path;
     MqttConfig mqtt;
     RtspConfig rtsp;
     ServiceInfo service;
-    std::map<std::string, ModelInfo> scenario_lookup;
-    std::vector<ScenarioConfig> scenario_list;
+    std::vector<ScenarioConfig> scenarios;
+    std::map<std::string, std::size_t> scenario_lookup;
 };
 
 AppConfig loadConfig(const std::string& path);

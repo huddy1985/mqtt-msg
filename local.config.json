@@ -1,52 +1,40 @@
 {
   "mqtt": {
-    "server": "mqtt.example.com",
-    "port": 1883,
     "client_id": "edge-analytics",
-    "subscribe_topic": "edge/commands",
-    "publish_topic": "edge/results"
+    "port": 1883,
+    "publish_topic": "edge/results",
+    "server": "mqtt.example.com",
+    "subscribe_topic": "edge/commands"
   },
   "rtsp": {
     "host": "192.168.1.10",
-    "port": 554,
-    "path": "/stream"
-  },
-  "service": {
-    "name": "edge-video-analyzer",
-    "description": "Simulated MQTT driven analytics service"
+    "path": "/stream",
+    "port": 554
   },
   "scenarios": [
     {
-      "id": "steam_detection",
-      "model": {
-        "id": "cnn_v1",
-        "type": "cnn",
-        "path": "models/cnn_v1.onnx"
-      }
+      "active": false,
+      "config": "config/scenario_steam_detection.json",
+      "id": "steam_detection"
     },
     {
-      "id": "coal_powder_detection",
-      "model": {
-        "id": "yolo11_coal",
-        "type": "yolo11",
-        "path": "models/yolo11_traffic.onnx"
-      }
+      "active": false,
+      "config": "config/scenario_coal_powder_detection.json",
+      "id": "coal_powder_detection"
     },
     {
-      "id": "ash_powder_detection",
-      "model": {
-        "id": "yolo11_ash",
-        "type": "yolo11",
-        "path": "models/yolo11_traffic.onnx"
-      }
+      "active": false,
+      "config": "config/scenario_ash_powder_detection.json",
+      "id": "ash_powder_detection"
     },
     {
-      "id": "liquid_leak_detection",
-      "model": {
-        "id": "yolo11_liquid",
-        "type": "yolo11",
-        "path": "models/yolo11_traffic.onnx"
-      }
+      "active": false,
+      "config": "config/scenario_liquid_leak_detection.json",
+      "id": "liquid_leak_detection"
     }
-  ]
+  ],
+  "service": {
+    "description": "Simulated MQTT driven analytics service",
+    "name": "edge-video-analyzer"
+  }
 }

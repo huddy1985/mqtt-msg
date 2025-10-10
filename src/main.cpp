@@ -101,10 +101,14 @@ simplejson::JsonValue buildServiceSnapshot(const app::AppConfig& config, const s
 
     simplejson::JsonValue scenarios = simplejson::makeArray();
     auto& array = scenarios.asArray();
-    for (const auto& scenario : config.scenario_list) {
+    for (const auto& scenario : config.scenarios) {
         simplejson::JsonValue entry = simplejson::makeObject();
         auto& map = entry.asObject();
         map["id"] = scenario.id;
+        map["active"] = scenario.active;
+        if (!scenario.config_path.empty()) {
+            map["config"] = scenario.config_path;
+        }
         simplejson::JsonValue model = simplejson::makeObject();
         auto& modelObj = model.asObject();
         modelObj["id"] = scenario.model.id;
@@ -252,6 +256,8 @@ int main(int argc, char* argv[]) {
 
                 commandObj["extra"] = command.extra;
 
+                pipeline.setActiveScenarios(command.scenario_ids);
+
                 simplejson::JsonValue scenarioResults = simplejson::makeArray();
                 auto& scenarioResultsArray = scenarioResults.asArray();
                 auto analyses = pipeline.process(command);
@@ -344,6 +350,8 @@ int main(int argc, char* argv[]) {
                     commandObj["filter_regions"] = regionsValue;
                 }
                 commandObj["extra"] = command.extra;
+
+                pipeline.setActiveScenarios(command.scenario_ids);
 
                 simplejson::JsonValue scenarioResults = simplejson::makeArray();
                 auto& scenarioResultsArray = scenarioResults.asArray();
