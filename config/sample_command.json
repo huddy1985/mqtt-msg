@@ -1,0 +1,16 @@
+{
+  "scenario_id": [
+    "steam_detection",
+    "liquid_leak_detection"
+  ],
+  "detection_regions": [
+    [0, 0, 0, 0]
+  ],
+  "filter_regions": [],
+  "threshold": 0.6,
+  "fps": 1,
+  "activation_code": "ABC-123",
+  "extra": {
+    "notes": "Demo request for multi-scenario analysis"
+  }
+}
