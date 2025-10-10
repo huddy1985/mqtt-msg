@@ -18,11 +18,11 @@
   "scenarios": [
     {
       "id": "factory_floor",
-      "model": {
-        "id": "cnn_v1",
-        "type": "cnn",
-        "path": "models/cnn_v1.pt"
-      }
+        "model": {
+          "id": "cnn_v1",
+          "type": "cnn",
+          "path": "models/cnn_v1.onnx"
+        }
     },
     {
       "id": "traffic_junction",

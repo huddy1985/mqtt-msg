@@ -16,10 +16,26 @@ add_executable(mqtt_msg
 
 target_include_directories(mqtt_msg PRIVATE include)
 
-find_package(Torch QUIET)
-if (Torch_FOUND)
-    target_compile_definitions(mqtt_msg PRIVATE APP_HAS_TORCH)
-    target_include_directories(mqtt_msg PRIVATE ${TORCH_INCLUDE_DIRS})
-    target_link_libraries(mqtt_msg PRIVATE ${TORCH_LIBRARIES})
+set(ONNXRUNTIME_HINT_DIRS
+    $ENV{ONNXRUNTIME_ROOT}
+    $ENV{ONNXRUNTIME_DIR}
+)
+
+find_path(ONNXRUNTIME_INCLUDE_DIR
+    NAMES onnxruntime_cxx_api.h
+    HINTS ${ONNXRUNTIME_HINT_DIRS}
+    PATH_SUFFIXES include include/onnxruntime
+)
+
+find_library(ONNXRUNTIME_LIBRARY
+    NAMES onnxruntime
+    HINTS ${ONNXRUNTIME_HINT_DIRS}
+    PATH_SUFFIXES lib lib64
+)
+
+if (ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIBRARY)
+    target_compile_definitions(mqtt_msg PRIVATE APP_HAS_ONNXRUNTIME)
+    target_include_directories(mqtt_msg PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+    target_link_libraries(mqtt_msg PRIVATE ${ONNXRUNTIME_LIBRARY})
 endif()
 

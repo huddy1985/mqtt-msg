@@ -24,7 +24,7 @@
 - `include/app/config.hpp` 与 `src/config.cpp`：加载本地配置文件。
 - `include/app/command.hpp` 与 `src/command.cpp`：解析 MQTT 指令。
 - `include/app/pipeline.hpp` 与 `src/pipeline.cpp`：根据配置模拟分析流程，并在每次分析时将抓取到的帧保存到本地，同时支持在 CNN 场景下调用推理接口。
-- `include/app/cnn.hpp` 与 `src/cnn.cpp`：封装基于 PyTorch C++ API（TorchScript）加载 CNN 模型的逻辑，并在无法提供实际模型时使用占位推理结果。
+- `include/app/cnn.hpp` 与 `src/cnn.cpp`：封装基于 ONNX Runtime API 加载 CNN 模型的逻辑，并在无法提供实际模型时使用占位推理结果。
 - `include/app/rtsp.hpp` 与 `src/rtsp.cpp`：使用 `ffmpeg` 命令行工具通过 RTSP 协议按指定帧率拉取视频流并生成图片。
 - `src/main.cpp`：命令行入口，整合配置读取、指令解析与结果输出。
 
@@ -69,22 +69,34 @@ cmake --build build
 程序输出的 JSON 包含所选模型信息、模拟的时间戳、抓取图片的存储路径
 以及每个检测区域的处理结果，可作为在目标硬件环境上开发真实 MQTT 分
 析服务的参考框架。当场景类型为 `cnn` 时，程序会加载配置中指定的
-TorchScript 模型，针对抓取到的帧生成分类标签和置信度，并将推理结
-果写入最终的 JSON。若未提供真实模型，工程内置的占位文件会确保流程
-仍能执行并生成结构化数据。
+ONNX 模型，针对抓取到的帧生成分类标签和置信度，并将推理结果写入最终
+的 JSON。若未提供真实模型，工程内置的占位文件会确保流程仍能执行并生
+成结构化数据。
 
 ## CNN 模型加载与推理
 
 `local.config.json` 中的场景列表包含一个 `factory_floor` 示例，其模型
-类型为 `cnn` 并指向 `models/cnn_v1.pt` 占位文件。程序会尝试通过
-PyTorch C++ API (`torch::jit::load`) 加载该文件，以模拟 TorchScript
-模型的部署方式。如果系统未安装 libtorch，编译过程仍然会成功，但推理
-逻辑将退化为对帧数据的哈希指纹计算，从而生成可重复的标签与置信度，
-便于 MQTT 报文流程的端到端验证。
+类型为 `cnn` 并指向 `models/cnn_v1.onnx` 占位文件。程序会尝试通过
+ONNX Runtime C++ API 加载该文件，以模拟部署在推理引擎中的模型。如
+果系统未安装 ONNX Runtime，编译过程仍然会成功，但推理逻辑将退化为对
+帧数据的哈希指纹计算，从而生成可重复的标签与置信度，便于 MQTT 报文流
+程的端到端验证。
 
-要替换为真实模型，可将导出的 TorchScript `.pt` 文件放置在 `models/`
-目录下（或更新配置中的路径），并确保编译环境已经安装与配置好的
-libtorch。重新编译后即可在 CNN 场景下获得真实的推理输出。
+要替换为真实模型，可将导出的 ONNX `.onnx` 文件放置在 `models/` 目录
+下（或更新配置中的路径），并确保编译环境已经安装与配置好的 ONNX
+Runtime。重新编译后即可在 CNN 场景下获得真实的推理输出。
+
+项目新增 `tools/export_cnn_to_onnx.py` 脚本，便于在开发主机上将 PyTorch
+训练得到的模型导出为 ONNX 格式。示例用法如下：
+
+```bash
+python tools/export_cnn_to_onnx.py path/to/model.pt models/my_model.onnx \
+  --input-shape 1x3x224x224 --opset 13
+```
+
+脚本支持直接加载 `torch.jit.save` 导出的模型，或在缺失真实模型时以内置
+的轻量 CNN 结构生成占位 ONNX 文件，方便在目标设备上联调 MQTT 推理流
+程。
 
 ## RTSP 帧采集
 
