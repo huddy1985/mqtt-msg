@@ -1,9 +1,11 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "app/command.hpp"
 #include "app/config.hpp"
+#include "app/rtsp.hpp"
 
 namespace app {
 
@@ -17,6 +19,7 @@ struct DetectionResult {
 struct FrameResult {
     double timestamp = 0.0;
     std::vector<DetectionResult> detections;
+    std::string image_path;
 };
 
 struct AnalysisResult {
@@ -37,6 +40,7 @@ public:
 
 private:
     AppConfig config_;
+    RtspFrameGrabber frame_grabber_;
 };
 
 }  // namespace app

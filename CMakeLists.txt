@@ -10,6 +10,7 @@ add_executable(mqtt_msg
     src/config.cpp
     src/command.cpp
     src/pipeline.cpp
+    src/rtsp.cpp
 )
 
 target_include_directories(mqtt_msg PRIVATE include)
