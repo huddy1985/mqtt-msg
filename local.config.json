@@ -1,0 +1,36 @@
+{
+  "mqtt": {
+    "server": "mqtt.example.com",
+    "port": 1883,
+    "client_id": "edge-analytics",
+    "subscribe_topic": "edge/commands",
+    "publish_topic": "edge/results"
+  },
+  "rtsp": {
+    "host": "192.168.1.10",
+    "port": 554,
+    "path": "/stream"
+  },
+  "service": {
+    "name": "edge-video-analyzer",
+    "description": "Simulated MQTT driven analytics service"
+  },
+  "scenarios": [
+    {
+      "id": "factory_floor",
+      "model": {
+        "id": "cnn_v1",
+        "type": "cnn",
+        "path": "models/cnn_v1.bin"
+      }
+    },
+    {
+      "id": "traffic_junction",
+      "model": {
+        "id": "yolo11_traffic",
+        "type": "yolo11",
+        "path": "models/yolo11_traffic.onnx"
+      }
+    }
+  ]
+}

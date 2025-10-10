@@ -1,0 +1,16 @@
+{
+  "scenario_id": "traffic_junction",
+  "detection_regions": [
+    [10, 10, 120, 160],
+    [200, 50, 320, 200]
+  ],
+  "filter_regions": [
+    [200, 50, 320, 200]
+  ],
+  "threshold": 0.6,
+  "fps": 2,
+  "activation_code": "ABC-123",
+  "extra": {
+    "notes": "High traffic lane"
+  }
+}
