@@ -1,0 +1,14 @@
+{
+  "id": "steam_detection",
+  "name": "Steam plume detection",
+  "description": "Identifies abnormal steam emissions using a CNN classifier.",
+  "model": {
+    "id": "cnn_v1",
+    "type": "cnn",
+    "path": "models/cnn_v1.onnx"
+  },
+  "preprocessing": {
+    "resize": [640, 480],
+    "normalize": true
+  }
+}
