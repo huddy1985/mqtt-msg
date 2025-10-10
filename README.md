@@ -73,12 +73,20 @@ cmake --build build
   },
   "scenarios": [
     {
-      "id": "factory_floor",
+      "id": "steam_detection",
       "model": { "id": "cnn_v1", "type": "cnn", "path": "models/cnn_v1.onnx" }
     },
     {
-      "id": "traffic_junction",
-      "model": { "id": "yolo11", "type": "yolo", "path": "models/yolo11_traffic.onnx" }
+      "id": "coal_powder_detection",
+      "model": { "id": "yolo11_coal", "type": "yolo11", "path": "models/yolo11_traffic.onnx" }
+    },
+    {
+      "id": "ash_powder_detection",
+      "model": { "id": "yolo11_ash", "type": "yolo11", "path": "models/yolo11_traffic.onnx" }
+    },
+    {
+      "id": "liquid_leak_detection",
+      "model": { "id": "yolo11_liquid", "type": "yolo11", "path": "models/yolo11_traffic.onnx" }
     }
   ]
 }
@@ -89,7 +97,7 @@ cmake --build build
 - `mqtt.publish_topic`：分析结果与注册信息默认发布的主题，可被命令中的
   `response_topic` 覆盖。  
 - `rtsp`：抽帧所需的 RTSP 地址信息。  
-- `scenarios`：场景与模型的映射。模型类型以 `cnn` 或 `yolo` 开头决定加载逻辑。
+- `scenarios`：场景与模型的映射。本文示例分别对应蒸汽、煤粉、灰粉与液体泄漏场景。模型类型以 `cnn` 或 `yolo` 开头决定加载逻辑。
 
 ## 运行方式
 
@@ -105,10 +113,10 @@ cmake --build build
 2. 发布一条注册报文（`type=service_registration`），包含服务名称、描述、
    本地 IP、订阅/发布主题及可用场景。  
 3. 订阅 `subscribe_topic`，收到命令后按顺序执行：
-   - 解析场景、检测区域、过滤区域、阈值、帧率等参数；
-   - 调用 RTSP 拉流模块按频率抽帧，并将图片保存到 `captures/<service>` 目录；
-   - 根据场景加载 CNN 或 YOLO ONNX 模型进行推理；
-   - 生成结果数组，填充每个检测框的类别、坐标、置信度以及帧时间戳；
+   - 解析命令内的场景数组、检测区域、过滤区域、阈值、帧率等参数；
+   - 针对每个场景串行加载对应模型，调用 RTSP 拉流模块按频率抽帧，并将图片保存到 `captures/<service>/<scenario>` 目录；
+   - 将抽帧结果送入 CNN 或 YOLO ONNX 模型推理；
+   - 汇总多场景结果，填充每个检测框的类别、坐标、置信度以及帧时间戳；
    - 以 `type=analysis_result` 消息发布到 `publish_topic`（或命令指定的响应主题）。
 
 服务可通过 `Ctrl+C`、`SIGTERM` 等信号安全停止，信号会触发 MQTT 断连并退出循环。
@@ -122,7 +130,7 @@ cmake --build build
 # 或者从标准输入读取命令
 ./build/mqtt_msg --config local.config.json --oneshot <<'JSON'
 {
-  "scenario_id": "factory_floor",
+  "scenario_id": ["steam_detection", "liquid_leak_detection"],
   "detection_regions": [[0, 0, 100, 100]],
   "threshold": 0.6,
   "fps": 1
@@ -142,7 +150,7 @@ JSON
   "response_topic": "analysis/results/factory",
   "commands": [
     {
-      "scenario_id": "factory_floor",
+      "scenario_id": ["steam_detection", "liquid_leak_detection"],
       "detection_regions": [[0, 0, 100, 100]],
       "filter_regions": [],
       "threshold": 0.7,
@@ -166,18 +174,44 @@ JSON
   "request_id": "cmd-001",
   "results": [
     {
-      "scenario_id": "factory_floor",
-      "model": {"id": "cnn_v1", "type": "cnn", "path": "models/cnn_v1.onnx"},
-      "frames": [
+      "scenario_ids": ["steam_detection", "liquid_leak_detection"],
+      "threshold": 0.7,
+      "fps": 1,
+      "activation_code": "ABC-123",
+      "results": [
         {
-          "timestamp": 0.0,
-          "image_path": "captures/factory-analytics/frame_000000.jpg",
-          "detections": [
+          "scenario_id": "steam_detection",
+          "model": {"id": "cnn_v1", "type": "cnn", "path": "models/cnn_v1.onnx"},
+          "frames": [
             {
-              "label": "class_0",
-              "region": [0, 0, 100, 100],
-              "confidence": 0.92,
-              "filtered": false
+              "timestamp": 0.0,
+              "image_path": "captures/factory-analytics/steam_detection/frame_000000.jpg",
+              "detections": [
+                {
+                  "label": "class_0",
+                  "region": [0, 0, 100, 100],
+                  "confidence": 0.92,
+                  "filtered": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "scenario_id": "liquid_leak_detection",
+          "model": {"id": "yolo11_liquid", "type": "yolo11", "path": "models/yolo11_traffic.onnx"},
+          "frames": [
+            {
+              "timestamp": 0.0,
+              "image_path": "captures/factory-analytics/liquid_leak_detection/frame_000000.jpg",
+              "detections": [
+                {
+                  "label": "leak",
+                  "region": [0, 0, 100, 100],
+                  "confidence": 0.87,
+                  "filtered": false
+                }
+              ]
             }
           ]
         }

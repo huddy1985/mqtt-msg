@@ -202,13 +202,67 @@ int main(int argc, char* argv[]) {
             auto& obj = output.asObject();
             obj["service_name"] = effectiveConfig.service.name;
             obj["timestamp"] = currentIsoTimestamp();
-            simplejson::JsonValue frames = simplejson::makeArray();
-            auto& array = frames.asArray();
+            simplejson::JsonValue resultsValue = simplejson::makeArray();
+            auto& resultsArray = resultsValue.asArray();
             for (const auto& command : commands) {
-                app::AnalysisResult result = pipeline.process(command);
-                array.push_back(app::toJson(result));
+                simplejson::JsonValue commandResult = simplejson::makeObject();
+                auto& commandObj = commandResult.asObject();
+
+                simplejson::JsonValue scenarioIds = simplejson::makeArray();
+                auto& scenarioArray = scenarioIds.asArray();
+                for (const auto& scenarioId : command.scenario_ids) {
+                    scenarioArray.push_back(scenarioId);
+                }
+                commandObj["scenario_ids"] = scenarioIds;
+                commandObj["threshold"] = command.threshold;
+                commandObj["fps"] = command.fps;
+                if (!command.activation_code.empty()) {
+                    commandObj["activation_code"] = command.activation_code;
+                }
+
+                if (!command.detection_regions.empty()) {
+                    simplejson::JsonValue regionsValue = simplejson::makeArray();
+                    auto& regionsArray = regionsValue.asArray();
+                    for (const auto& region : command.detection_regions) {
+                        simplejson::JsonValue regionValue = simplejson::makeArray();
+                        auto& regionArray = regionValue.asArray();
+                        regionArray.push_back(region.x1);
+                        regionArray.push_back(region.y1);
+                        regionArray.push_back(region.x2);
+                        regionArray.push_back(region.y2);
+                        regionsArray.push_back(regionValue);
+                    }
+                    commandObj["detection_regions"] = regionsValue;
+                }
+
+                if (!command.filter_regions.empty()) {
+                    simplejson::JsonValue regionsValue = simplejson::makeArray();
+                    auto& regionsArray = regionsValue.asArray();
+                    for (const auto& region : command.filter_regions) {
+                        simplejson::JsonValue regionValue = simplejson::makeArray();
+                        auto& regionArray = regionValue.asArray();
+                        regionArray.push_back(region.x1);
+                        regionArray.push_back(region.y1);
+                        regionArray.push_back(region.x2);
+                        regionArray.push_back(region.y2);
+                        regionsArray.push_back(regionValue);
+                    }
+                    commandObj["filter_regions"] = regionsValue;
+                }
+
+                commandObj["extra"] = command.extra;
+
+                simplejson::JsonValue scenarioResults = simplejson::makeArray();
+                auto& scenarioResultsArray = scenarioResults.asArray();
+                auto analyses = pipeline.process(command);
+                for (const auto& analysis : analyses) {
+                    scenarioResultsArray.push_back(app::toJson(analysis));
+                }
+                commandObj["results"] = scenarioResults;
+
+                resultsArray.push_back(commandResult);
             }
-            obj["results"] = frames;
+            obj["results"] = resultsValue;
             std::cout << output.dump(prettyPrint ? 2 : -1) << std::endl;
             return 0;
         }
@@ -245,10 +299,61 @@ int main(int argc, char* argv[]) {
             root["command_count"] = static_cast<int>(commands.size());
 
             simplejson::JsonValue resultArray = simplejson::makeArray();
-            auto& array = resultArray.asArray();
+            auto& commandArray = resultArray.asArray();
             for (const auto& command : commands) {
-                app::AnalysisResult analysis = pipeline.process(command);
-                array.push_back(app::toJson(analysis));
+                simplejson::JsonValue commandResult = simplejson::makeObject();
+                auto& commandObj = commandResult.asObject();
+
+                simplejson::JsonValue scenarioIds = simplejson::makeArray();
+                auto& scenarioArray = scenarioIds.asArray();
+                for (const auto& scenarioId : command.scenario_ids) {
+                    scenarioArray.push_back(scenarioId);
+                }
+                commandObj["scenario_ids"] = scenarioIds;
+                commandObj["threshold"] = command.threshold;
+                commandObj["fps"] = command.fps;
+                if (!command.activation_code.empty()) {
+                    commandObj["activation_code"] = command.activation_code;
+                }
+                if (!command.detection_regions.empty()) {
+                    simplejson::JsonValue regionsValue = simplejson::makeArray();
+                    auto& regionsArray = regionsValue.asArray();
+                    for (const auto& region : command.detection_regions) {
+                        simplejson::JsonValue regionValue = simplejson::makeArray();
+                        auto& regionArray = regionValue.asArray();
+                        regionArray.push_back(region.x1);
+                        regionArray.push_back(region.y1);
+                        regionArray.push_back(region.x2);
+                        regionArray.push_back(region.y2);
+                        regionsArray.push_back(regionValue);
+                    }
+                    commandObj["detection_regions"] = regionsValue;
+                }
+                if (!command.filter_regions.empty()) {
+                    simplejson::JsonValue regionsValue = simplejson::makeArray();
+                    auto& regionsArray = regionsValue.asArray();
+                    for (const auto& region : command.filter_regions) {
+                        simplejson::JsonValue regionValue = simplejson::makeArray();
+                        auto& regionArray = regionValue.asArray();
+                        regionArray.push_back(region.x1);
+                        regionArray.push_back(region.y1);
+                        regionArray.push_back(region.x2);
+                        regionArray.push_back(region.y2);
+                        regionsArray.push_back(regionValue);
+                    }
+                    commandObj["filter_regions"] = regionsValue;
+                }
+                commandObj["extra"] = command.extra;
+
+                simplejson::JsonValue scenarioResults = simplejson::makeArray();
+                auto& scenarioResultsArray = scenarioResults.asArray();
+                auto analyses = pipeline.process(command);
+                for (const auto& analysis : analyses) {
+                    scenarioResultsArray.push_back(app::toJson(analysis));
+                }
+                commandObj["results"] = scenarioResults;
+
+                commandArray.push_back(commandResult);
             }
             root["results"] = resultArray;
 

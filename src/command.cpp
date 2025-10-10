@@ -37,7 +37,21 @@ std::vector<Region> parseRegions(const simplejson::JsonValue& value) {
 
 Command parseCommand(const simplejson::JsonValue& json) {
     Command command;
-    command.scenario_id = json.getString("scenario_id");
+    if (!json.contains("scenario_id")) {
+        throw std::runtime_error("Command must contain scenario_id");
+    }
+
+    const auto& scenarioValue = json.at("scenario_id");
+    if (scenarioValue.isArray()) {
+        for (const auto& entry : scenarioValue.asArray()) {
+            command.scenario_ids.push_back(entry.asString());
+        }
+    } else {
+        command.scenario_ids.push_back(scenarioValue.asString());
+    }
+    if (command.scenario_ids.empty()) {
+        throw std::runtime_error("scenario_id must not be empty");
+    }
     if (json.contains("detection_regions")) {
         command.detection_regions = parseRegions(json.at("detection_regions"));
     }

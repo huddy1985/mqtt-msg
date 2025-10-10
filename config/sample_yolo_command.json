@@ -1,5 +1,8 @@
 {
-  "scenario_id": "traffic_junction",
+  "scenario_id": [
+    "coal_powder_detection",
+    "ash_powder_detection"
+  ],
   "detection_regions": [
     [0, 0, 1920, 1080]
   ],
@@ -10,6 +13,6 @@
   "fps": 2,
   "activation_code": "TRAFFIC-001",
   "extra": {
-    "notes": "Demo request for YOLO object detection"
+    "notes": "Demo request for YOLO object detection across powder scenarios"
   }
 }

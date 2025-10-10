@@ -19,7 +19,7 @@ struct Region {
 };
 
 struct Command {
-    std::string scenario_id;
+    std::vector<std::string> scenario_ids;
     std::vector<Region> detection_regions;
     std::vector<Region> filter_regions;
     double threshold = 0.5;

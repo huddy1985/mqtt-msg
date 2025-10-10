@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <system_error>
@@ -90,10 +91,10 @@ simplejson::JsonValue toJson(const AnalysisResult& result) {
 
 namespace {
 
-std::filesystem::path ensureCaptureDirectory(const std::string& serviceName) {
+std::string sanitizeName(const std::string& name) {
     std::string sanitized;
-    sanitized.reserve(serviceName.size());
-    for (char ch : serviceName) {
+    sanitized.reserve(name.size());
+    for (char ch : name) {
         if (std::isalnum(static_cast<unsigned char>(ch)) || ch == '-' || ch == '_' || ch == '.') {
             sanitized.push_back(ch);
         }
@@ -101,14 +102,25 @@ std::filesystem::path ensureCaptureDirectory(const std::string& serviceName) {
     if (sanitized.empty()) {
         sanitized = "captures";
     }
+    return sanitized;
+}
 
-    std::filesystem::path directory = std::filesystem::path("captures") / sanitized;
+std::filesystem::path ensureCaptureDirectory(const std::string& serviceName, const std::string& scenarioId) {
+    std::filesystem::path directory = std::filesystem::path("captures") / sanitizeName(serviceName);
     std::error_code ec;
     std::filesystem::create_directories(directory, ec);
     if (ec) {
         // fall back to base captures directory if nested creation fails
         directory = std::filesystem::path("captures");
         std::filesystem::create_directories(directory, ec);
+    }
+    if (!scenarioId.empty()) {
+        std::filesystem::path scenarioDir = directory / sanitizeName(scenarioId);
+        std::error_code scenarioEc;
+        std::filesystem::create_directories(scenarioDir, scenarioEc);
+        if (!scenarioEc) {
+            directory = scenarioDir;
+        }
     }
     return directory;
 }
@@ -146,140 +158,151 @@ std::string saveFrameToDisk(const std::filesystem::path& directory,
 ProcessingPipeline::ProcessingPipeline(AppConfig config)
     : config_(std::move(config)), frame_grabber_(config_.rtsp) {}
 
-AnalysisResult ProcessingPipeline::process(const Command& command) const {
-    AnalysisResult result;
-    result.scenario_id = command.scenario_id;
-
-    auto modelIt = config_.scenario_lookup.find(command.scenario_id);
-    if (modelIt == config_.scenario_lookup.end()) {
-        throw std::runtime_error("Unknown scenario: " + command.scenario_id);
-    }
-    result.model = modelIt->second;
-
-    double fps = command.fps > 0.0 ? command.fps : 1.0;
-    double interval = 1.0 / fps;
-
-    std::vector<Region> regions = command.detection_regions;
-    if (regions.empty()) {
-        regions.push_back(Region{0, 0, 0, 0});
+std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) const {
+    if (command.scenario_ids.empty()) {
+        throw std::runtime_error("Command must define at least one scenario");
     }
 
-    bool useCnn = (result.model.type == "cnn");
-    bool useYolo = (!useCnn && result.model.type.rfind("yolo", 0) == 0);
-    std::size_t frameCount = regions.size();
+    std::vector<AnalysisResult> results;
+    results.reserve(command.scenario_ids.size());
 
-    std::unique_ptr<CnnModel> cnnModel;
-    std::unique_ptr<YoloModel> yoloModel;
-    if (useCnn) {
+    for (const auto& scenarioId : command.scenario_ids) {
+        AnalysisResult result;
+        result.scenario_id = scenarioId;
+
+        auto modelIt = config_.scenario_lookup.find(scenarioId);
+        if (modelIt == config_.scenario_lookup.end()) {
+            throw std::runtime_error("Unknown scenario: " + scenarioId);
+        }
+        result.model = modelIt->second;
+
+        double fps = command.fps > 0.0 ? command.fps : 1.0;
+        double interval = 1.0 / fps;
+
+        std::vector<Region> regions = command.detection_regions;
+        if (regions.empty()) {
+            regions.push_back(Region{0, 0, 0, 0});
+        }
+
+        bool useCnn = (result.model.type == "cnn");
+        bool useYolo = (!useCnn && result.model.type.rfind("yolo", 0) == 0);
+        std::size_t frameCount = regions.size();
+
+        std::unique_ptr<CnnModel> cnnModel;
+        std::unique_ptr<YoloModel> yoloModel;
+        if (useCnn) {
+            try {
+                cnnModel = std::make_unique<CnnModel>(result.model.path);
+            } catch (const std::exception& ex) {
+                std::cerr << "CNN model load failed: " << ex.what() << "\n";
+            }
+            if (!frameCount) {
+                frameCount = 1;
+            }
+        } else if (useYolo) {
+            try {
+                yoloModel = std::make_unique<YoloModel>(result.model.path);
+            } catch (const std::exception& ex) {
+                std::cerr << "YOLO model load failed: " << ex.what() << "\n";
+            }
+            if (!frameCount) {
+                frameCount = 1;
+            }
+        }
+
+        std::vector<CapturedFrame> capturedFrames;
         try {
-            cnnModel = std::make_unique<CnnModel>(result.model.path);
+            capturedFrames = frame_grabber_.capture(fps, frameCount, std::chrono::milliseconds(5000));
         } catch (const std::exception& ex) {
-            std::cerr << "CNN model load failed: " << ex.what() << "\n";
-        }
-        if (!frameCount) {
-            frameCount = 1;
-        }
-    } else if (useYolo) {
-        try {
-            yoloModel = std::make_unique<YoloModel>(result.model.path);
-        } catch (const std::exception& ex) {
-            std::cerr << "YOLO model load failed: " << ex.what() << "\n";
-        }
-        if (!frameCount) {
-            frameCount = 1;
-        }
-    }
-
-    std::vector<CapturedFrame> capturedFrames;
-    try {
-        capturedFrames = frame_grabber_.capture(fps, frameCount, std::chrono::milliseconds(5000));
-    } catch (const std::exception& ex) {
-        std::cerr << "RTSP capture failed: " << ex.what() << "\n";
-    }
-
-    std::filesystem::path captureDir = ensureCaptureDirectory(config_.service.name);
-
-    for (std::size_t index = 0; index < frameCount; ++index) {
-        FrameResult frame;
-        if (index < capturedFrames.size()) {
-            frame.timestamp = capturedFrames[index].timestamp;
-            std::string path = saveFrameToDisk(captureDir, index, capturedFrames[index]);
-            frame.image_path = path;
-        } else {
-            frame.timestamp = index * interval;
+            std::cerr << "RTSP capture failed: " << ex.what() << "\n";
         }
 
-        if (useCnn && cnnModel && cnnModel->isLoaded()) {
-            const CapturedFrame* frameData = (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
-            CapturedFrame synthetic;
-            if (!frameData) {
-                synthetic.timestamp = frame.timestamp;
-                synthetic.format = "synthetic";
-                synthetic.data.reserve(regions.size() * 4 + command.scenario_id.size());
-                for (const auto& region : regions) {
-                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x1 + region.y1) & 0xFF));
-                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x2 + region.y2) & 0xFF));
-                }
-                for (char ch : command.scenario_id) {
-                    synthetic.data.push_back(static_cast<std::uint8_t>(ch));
-                }
-                frameData = &synthetic;
+        std::filesystem::path captureDir = ensureCaptureDirectory(config_.service.name, scenarioId);
+
+        for (std::size_t index = 0; index < frameCount; ++index) {
+            FrameResult frame;
+            if (index < capturedFrames.size()) {
+                frame.timestamp = capturedFrames[index].timestamp;
+                std::string path = saveFrameToDisk(captureDir, index, capturedFrames[index]);
+                frame.image_path = path;
+            } else {
+                frame.timestamp = index * interval;
             }
 
-            auto predictions = cnnModel->infer(*frameData);
-            if (predictions.empty()) {
-                predictions.push_back(CnnPrediction{"unknown", 0.0});
-            }
+            if (useCnn && cnnModel && cnnModel->isLoaded()) {
+                const CapturedFrame* frameData = (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
+                CapturedFrame synthetic;
+                if (!frameData) {
+                    synthetic.timestamp = frame.timestamp;
+                    synthetic.format = "synthetic";
+                    synthetic.data.reserve(regions.size() * 4 + scenarioId.size());
+                    for (const auto& region : regions) {
+                        synthetic.data.push_back(static_cast<std::uint8_t>((region.x1 + region.y1) & 0xFF));
+                        synthetic.data.push_back(static_cast<std::uint8_t>((region.x2 + region.y2) & 0xFF));
+                    }
+                    for (char ch : scenarioId) {
+                        synthetic.data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
+                    }
+                    frameData = &synthetic;
+                }
 
-            for (std::size_t detIndex = 0; detIndex < predictions.size(); ++detIndex) {
-                Region region = detIndex < regions.size() ? regions[detIndex] : Region{0, 0, 0, 0};
+                auto predictions = cnnModel->infer(*frameData);
+                if (predictions.empty()) {
+                    predictions.push_back(CnnPrediction{"unknown", 0.0});
+                }
+
+                for (std::size_t detIndex = 0; detIndex < predictions.size(); ++detIndex) {
+                    Region region = detIndex < regions.size() ? regions[detIndex] : Region{0, 0, 0, 0};
+                    bool filtered = isFiltered(region, command.filter_regions);
+                    DetectionResult detection;
+                    detection.region = region;
+                    detection.filtered = filtered;
+                    detection.label = predictions[detIndex].label;
+                    detection.confidence = predictions[detIndex].confidence;
+                    frame.detections.push_back(std::move(detection));
+                }
+            } else if (useYolo && yoloModel && yoloModel->isLoaded()) {
+                const CapturedFrame* frameData = (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
+                CapturedFrame synthetic;
+                if (!frameData) {
+                    synthetic.timestamp = frame.timestamp;
+                    synthetic.format = "synthetic";
+                    synthetic.data.reserve(regions.size() * 4 + scenarioId.size());
+                    for (const auto& region : regions) {
+                        synthetic.data.push_back(static_cast<std::uint8_t>((region.x1 ^ region.y2) & 0xFF));
+                        synthetic.data.push_back(static_cast<std::uint8_t>((region.x2 ^ region.y1) & 0xFF));
+                    }
+                    for (char ch : scenarioId) {
+                        synthetic.data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
+                    }
+                    frameData = &synthetic;
+                }
+
+                auto detections = yoloModel->infer(*frameData, regions);
+                for (const auto& yoloDet : detections) {
+                    Region region = yoloDet.region;
+                    bool filtered = isFiltered(region, command.filter_regions);
+                    DetectionResult detection;
+                    detection.region = region;
+                    detection.filtered = filtered;
+                    detection.label = yoloDet.label;
+                    detection.confidence = yoloDet.confidence;
+                    frame.detections.push_back(std::move(detection));
+                }
+            } else {
+                const auto& region = regions[index % regions.size()];
                 bool filtered = isFiltered(region, command.filter_regions);
-                DetectionResult detection;
-                detection.region = region;
-                detection.filtered = filtered;
-                detection.label = predictions[detIndex].label;
-                detection.confidence = predictions[detIndex].confidence;
-                frame.detections.push_back(std::move(detection));
-            }
-        } else if (useYolo && yoloModel && yoloModel->isLoaded()) {
-            const CapturedFrame* frameData = (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
-            CapturedFrame synthetic;
-            if (!frameData) {
-                synthetic.timestamp = frame.timestamp;
-                synthetic.format = "synthetic";
-                synthetic.data.reserve(regions.size() * 4 + command.scenario_id.size());
-                for (const auto& region : regions) {
-                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x1 ^ region.y2) & 0xFF));
-                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x2 ^ region.y1) & 0xFF));
-                }
-                for (char ch : command.scenario_id) {
-                    synthetic.data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
-                }
-                frameData = &synthetic;
+                DetectionResult detection = makeDetection(region, result.model, command.threshold, filtered);
+                frame.detections.push_back(detection);
             }
 
-            auto detections = yoloModel->infer(*frameData, regions);
-            for (const auto& yoloDet : detections) {
-                Region region = yoloDet.region;
-                bool filtered = isFiltered(region, command.filter_regions);
-                DetectionResult detection;
-                detection.region = region;
-                detection.filtered = filtered;
-                detection.label = yoloDet.label;
-                detection.confidence = yoloDet.confidence;
-                frame.detections.push_back(std::move(detection));
-            }
-        } else {
-            const auto& region = regions[index % regions.size()];
-            bool filtered = isFiltered(region, command.filter_regions);
-            DetectionResult detection = makeDetection(region, result.model, command.threshold, filtered);
-            frame.detections.push_back(detection);
+            result.frames.push_back(std::move(frame));
         }
 
-        result.frames.push_back(std::move(frame));
+        results.push_back(std::move(result));
     }
 
-    return result;
+    return results;
 }
 
 }  // namespace app

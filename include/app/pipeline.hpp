@@ -34,7 +34,7 @@ class ProcessingPipeline {
 public:
     explicit ProcessingPipeline(AppConfig config);
 
-    AnalysisResult process(const Command& command) const;
+    std::vector<AnalysisResult> process(const Command& command) const;
 
     const AppConfig& config() const { return config_; }
 

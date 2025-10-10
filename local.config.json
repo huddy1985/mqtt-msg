@@ -17,17 +17,33 @@
   },
   "scenarios": [
     {
-      "id": "factory_floor",
-        "model": {
-          "id": "cnn_v1",
-          "type": "cnn",
-          "path": "models/cnn_v1.onnx"
-        }
+      "id": "steam_detection",
+      "model": {
+        "id": "cnn_v1",
+        "type": "cnn",
+        "path": "models/cnn_v1.onnx"
+      }
     },
     {
-      "id": "traffic_junction",
+      "id": "coal_powder_detection",
       "model": {
-        "id": "yolo11_traffic",
+        "id": "yolo11_coal",
+        "type": "yolo11",
+        "path": "models/yolo11_traffic.onnx"
+      }
+    },
+    {
+      "id": "ash_powder_detection",
+      "model": {
+        "id": "yolo11_ash",
+        "type": "yolo11",
+        "path": "models/yolo11_traffic.onnx"
+      }
+    },
+    {
+      "id": "liquid_leak_detection",
+      "model": {
+        "id": "yolo11_liquid",
         "type": "yolo11",
         "path": "models/yolo11_traffic.onnx"
       }
