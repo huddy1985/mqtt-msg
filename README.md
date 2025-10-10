@@ -13,7 +13,7 @@
 ├── include/        # 头文件
 ├── src/            # 源代码
 ├── config/         # 示例指令
-├── models/         # 占位 CNN 模型文件
+├── models/         # 占位 CNN / YOLO 模型文件
 ├── local.config.json
 └── README.md
 ```
@@ -25,6 +25,7 @@
 - `include/app/command.hpp` 与 `src/command.cpp`：解析 MQTT 指令。
 - `include/app/pipeline.hpp` 与 `src/pipeline.cpp`：根据配置模拟分析流程，并在每次分析时将抓取到的帧保存到本地，同时支持在 CNN 场景下调用推理接口。
 - `include/app/cnn.hpp` 与 `src/cnn.cpp`：封装基于 ONNX Runtime API 加载 CNN 模型的逻辑，并在无法提供实际模型时使用占位推理结果。
+- `include/app/yolo.hpp` 与 `src/yolo.cpp`：封装 YOLO 检测模型的 ONNX Runtime 调用流程，并提供基于帧内容指纹的占位检测结果。
 - `include/app/rtsp.hpp` 与 `src/rtsp.cpp`：使用 `ffmpeg` 命令行工具通过 RTSP 协议按指定帧率拉取视频流并生成图片。
 - `src/main.cpp`：命令行入口，整合配置读取、指令解析与结果输出。
 
@@ -45,10 +46,11 @@ cmake --build build
    ./build/mqtt_msg --config local.config.json
    ```
 
-2. 指定指令文件执行模拟分析（项目提供 `config/sample_command.json` 示例）：
+2. 指定指令文件执行模拟分析（项目提供 `config/sample_command.json` 以及 `config/sample_yolo_command.json` 两个示例）：
 
    ```bash
    ./build/mqtt_msg --config local.config.json --command config/sample_command.json
+   ./build/mqtt_msg --config local.config.json --command config/sample_yolo_command.json
    ```
 
    也可以通过标准输入传入 JSON 指令：
@@ -97,6 +99,26 @@ python tools/export_cnn_to_onnx.py path/to/model.pt models/my_model.onnx \
 脚本支持直接加载 `torch.jit.save` 导出的模型，或在缺失真实模型时以内置
 的轻量 CNN 结构生成占位 ONNX 文件，方便在目标设备上联调 MQTT 推理流
 程。
+
+## YOLO 模型加载与推理
+
+`local.config.json` 中还提供了一个 `traffic_junction` 场景，模型类型以
+`yolo` 前缀标记并指向 `models/yolo11_traffic.onnx` 占位文件。流程会尝试
+通过 ONNX Runtime 加载该模型，并在拉流获得的帧图像上执行检测。如果环
+境缺少 ONNX Runtime 或模型文件无法解析，程序会退化为基于帧数据哈希的
+可重复检测结果，继续输出候选框、标签与置信度，确保 MQTT 报文结构不变。
+
+要替换为真实 YOLO 模型，可借助 `tools/export_yolo_to_onnx.py` 脚本将
+PyTorch 权重导出为 ONNX：
+
+```bash
+python tools/export_yolo_to_onnx.py checkpoints/yolo.pt models/yolo_custom.onnx \
+  --input-shape 1x3x640x640 --classes 80 --anchors 3
+```
+
+脚本会优先加载实际的 TorchScript 或普通 `state_dict`，若失败则回退到内
+置的轻量 YOLO 结构，生成可用于连通性的占位模型，以方便在目标设备完成
+推理链路调试。
 
 ## RTSP 帧采集
 

@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "app/cnn.hpp"
+#include "app/yolo.hpp"
 
 namespace app {
 namespace {
@@ -164,14 +165,25 @@ AnalysisResult ProcessingPipeline::process(const Command& command) const {
     }
 
     bool useCnn = (result.model.type == "cnn");
+    bool useYolo = (!useCnn && result.model.type.rfind("yolo", 0) == 0);
     std::size_t frameCount = regions.size();
 
     std::unique_ptr<CnnModel> cnnModel;
+    std::unique_ptr<YoloModel> yoloModel;
     if (useCnn) {
         try {
             cnnModel = std::make_unique<CnnModel>(result.model.path);
         } catch (const std::exception& ex) {
             std::cerr << "CNN model load failed: " << ex.what() << "\n";
+        }
+        if (!frameCount) {
+            frameCount = 1;
+        }
+    } else if (useYolo) {
+        try {
+            yoloModel = std::make_unique<YoloModel>(result.model.path);
+        } catch (const std::exception& ex) {
+            std::cerr << "YOLO model load failed: " << ex.what() << "\n";
         }
         if (!frameCount) {
             frameCount = 1;
@@ -227,6 +239,34 @@ AnalysisResult ProcessingPipeline::process(const Command& command) const {
                 detection.filtered = filtered;
                 detection.label = predictions[detIndex].label;
                 detection.confidence = predictions[detIndex].confidence;
+                frame.detections.push_back(std::move(detection));
+            }
+        } else if (useYolo && yoloModel && yoloModel->isLoaded()) {
+            const CapturedFrame* frameData = (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
+            CapturedFrame synthetic;
+            if (!frameData) {
+                synthetic.timestamp = frame.timestamp;
+                synthetic.format = "synthetic";
+                synthetic.data.reserve(regions.size() * 4 + command.scenario_id.size());
+                for (const auto& region : regions) {
+                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x1 ^ region.y2) & 0xFF));
+                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x2 ^ region.y1) & 0xFF));
+                }
+                for (char ch : command.scenario_id) {
+                    synthetic.data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
+                }
+                frameData = &synthetic;
+            }
+
+            auto detections = yoloModel->infer(*frameData, regions);
+            for (const auto& yoloDet : detections) {
+                Region region = yoloDet.region;
+                bool filtered = isFiltered(region, command.filter_regions);
+                DetectionResult detection;
+                detection.region = region;
+                detection.filtered = filtered;
+                detection.label = yoloDet.label;
+                detection.confidence = yoloDet.confidence;
                 frame.detections.push_back(std::move(detection));
             }
         } else {

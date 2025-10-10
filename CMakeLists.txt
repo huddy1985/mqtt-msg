@@ -12,6 +12,7 @@ add_executable(mqtt_msg
     src/pipeline.cpp
     src/rtsp.cpp
     src/cnn.cpp
+    src/yolo.cpp
 )
 
 target_include_directories(mqtt_msg PRIVATE include)

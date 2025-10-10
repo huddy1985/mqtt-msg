@@ -1,0 +1,15 @@
+{
+  "scenario_id": "traffic_junction",
+  "detection_regions": [
+    [0, 0, 1920, 1080]
+  ],
+  "filter_regions": [
+    [100, 100, 400, 400]
+  ],
+  "threshold": 0.5,
+  "fps": 2,
+  "activation_code": "TRAFFIC-001",
+  "extra": {
+    "notes": "Demo request for YOLO object detection"
+  }
+}
