@@ -1,0 +1,42 @@
+{
+  "mqtt": {
+    "client_id": "edge-analytics",
+    "port": 1883,
+    "publish_topic": "edge/results",
+    "server": "mqtt.example.com",
+    "username": "edge-user",
+    "password": "edge-pass",
+    "subscribe_topic": "edge/commands"
+  },
+  "rtsp": {
+    "host": "192.168.1.10",
+    "path": "/stream",
+    "port": 554
+  },
+  "scenarios": [
+    {
+      "active": false,
+      "config": "config/scenario_steam_detection.json",
+      "id": "steam_detection"
+    },
+    {
+      "active": false,
+      "config": "config/scenario_coal_powder_detection.json",
+      "id": "coal_powder_detection"
+    },
+    {
+      "active": false,
+      "config": "config/scenario_ash_powder_detection.json",
+      "id": "ash_powder_detection"
+    },
+    {
+      "active": false,
+      "config": "config/scenario_liquid_leak_detection.json",
+      "id": "liquid_leak_detection"
+    }
+  ],
+  "service": {
+    "description": "Simulated MQTT driven analytics service",
+    "name": "edge-video-analyzer"
+  }
+}
