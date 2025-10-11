@@ -1,0 +1,14 @@
+{
+  "id": "steam_detection",
+  "name": "Steam Recognition",
+  "threshold": 0.6,
+  "models": [
+    {
+      "id": "steam_cnn_v1",
+      "type": "cnn",
+      "path": "models/steam_cnn.onnx",
+      "threshold": 0.6,
+      "labels": ["steam"]
+    }
+  ]
+}

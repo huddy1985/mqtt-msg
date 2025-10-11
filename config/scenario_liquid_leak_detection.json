@@ -1,0 +1,14 @@
+{
+  "id": "liquid_leak_detection",
+  "name": "Liquid Leak Recognition",
+  "threshold": 0.65,
+  "models": [
+    {
+      "id": "liquid_yolo_v1",
+      "type": "yolo",
+      "path": "models/liquid_yolo.onnx",
+      "threshold": 0.65,
+      "labels": ["liquid_leak"]
+    }
+  ]
+}

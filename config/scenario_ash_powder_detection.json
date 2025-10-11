@@ -1,0 +1,14 @@
+{
+  "id": "ash_powder_detection",
+  "name": "Ash Powder Recognition",
+  "threshold": 0.5,
+  "models": [
+    {
+      "id": "ash_cnn_v1",
+      "type": "cnn",
+      "path": "models/ash_cnn.onnx",
+      "threshold": 0.5,
+      "labels": ["ash_powder"]
+    }
+  ]
+}

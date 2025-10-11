@@ -1,0 +1,14 @@
+{
+  "id": "coal_powder_detection",
+  "name": "Coal Powder Recognition",
+  "threshold": 0.55,
+  "models": [
+    {
+      "id": "coal_yolo_v1",
+      "type": "yolo",
+      "path": "models/coal_yolo.onnx",
+      "threshold": 0.55,
+      "labels": ["coal_powder"]
+    }
+  ]
+}

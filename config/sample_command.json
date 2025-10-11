@@ -1,0 +1,16 @@
+{
+  "scenario_id": [
+    "steam_detection",
+    "coal_powder_detection"
+  ],
+  "regions": [
+    {"x": 0, "y": 0, "width": 640, "height": 480}
+  ],
+  "filters": [],
+  "threshold": 0.55,
+  "frame_rate": 2,
+  "activation_code": "demo-activation",
+  "extra": {
+    "note": "sample multi-scenario request"
+  }
+}

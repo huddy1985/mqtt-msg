@@ -1,0 +1,26 @@
+{
+  "service": {
+    "name": "industrial_monitor"
+  },
+  "rtsp": {
+    "url": "rtsp://127.0.0.1:8554/stream",
+    "frame_rate": 1,
+    "output_dir": "output/frames"
+  },
+  "mqtt": {
+    "host": "127.0.0.1",
+    "port": 1883,
+    "client_id": "industrial_monitor",
+    "username": "",
+    "password": "",
+    "command_topic": "analysis/commands",
+    "result_topic": "analysis/results"
+  },
+  "scenarios": {
+    "steam_detection": "config/scenario_steam_detection.json",
+    "coal_powder_detection": "config/scenario_coal_powder_detection.json",
+    "ash_powder_detection": "config/scenario_ash_powder_detection.json",
+    "liquid_leak_detection": "config/scenario_liquid_leak_detection.json"
+  },
+  "active_scenarios": []
+}
