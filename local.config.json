@@ -1,17 +1,17 @@
 {
   "mqtt": {
-    "client_id": "edge-analytics",
+    "client_id": "edge-analytics-client",
     "port": 1883,
     "publish_topic": "edge/results",
-    "server": "mqtt.example.com",
+    "server": "120.27.239.25",
     "username": "edge-user",
     "password": "edge-pass",
     "subscribe_topic": "edge/commands"
   },
   "rtsp": {
-    "host": "192.168.1.10",
-    "path": "/stream",
-    "port": 554
+    "host": "127.0.0.1",
+    "path": "/live.stream",
+    "port": 8554
   },
   "scenarios": [
     {

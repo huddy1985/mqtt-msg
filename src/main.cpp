@@ -1,4 +1,3 @@
-
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -21,7 +20,6 @@
 #include <thread>
 #include <vector>
 #include <arpa/inet.h>
-
 #include "app/command.hpp"
 #include "app/config.hpp"
 #include "app/mqtt.hpp"
@@ -256,9 +254,12 @@ int main(int argc, char* argv[]) {
             std::vector<app::Command> commands = app::parseCommandList(commandsJson);
 
             simplejson::JsonValue output = simplejson::makeObject();
+
             auto& obj = output.asObject();
+
             obj["service_name"] = effectiveConfig.service.name;
             obj["timestamp"] = currentIsoTimestamp();
+
             simplejson::JsonValue resultsValue = simplejson::makeArray();
             auto& resultsArray = resultsValue.asArray();
             for (const auto& command : commands) {
@@ -270,9 +271,11 @@ int main(int argc, char* argv[]) {
                 for (const auto& scenarioId : command.scenario_ids) {
                     scenarioArray.push_back(scenarioId);
                 }
+
                 commandObj["scenario_ids"] = scenarioIds;
                 commandObj["threshold"] = command.threshold;
                 commandObj["fps"] = command.fps;
+
                 if (!command.activation_code.empty()) {
                     commandObj["activation_code"] = command.activation_code;
                 }
@@ -314,6 +317,7 @@ int main(int argc, char* argv[]) {
                 simplejson::JsonValue scenarioResults = simplejson::makeArray();
                 auto& scenarioResultsArray = scenarioResults.asArray();
                 auto analyses = pipeline.process(command);
+
                 for (const auto& analysis : analyses) {
                     scenarioResultsArray.push_back(app::toJson(analysis));
                 }
@@ -343,6 +347,9 @@ int main(int argc, char* argv[]) {
                           &session_cv,
                           &active_session,
                           &session_version](const simplejson::JsonValue& payload, std::string& responseTopic) {
+            
+                            std::cout << "=== processor ===" << std::endl;
+
             const simplejson::JsonValue* commandSource = &payload;
             std::string requestId;
             simplejson::JsonValue commandMetadata;

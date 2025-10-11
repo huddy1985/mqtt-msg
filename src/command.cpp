@@ -1,5 +1,5 @@
 #include "app/command.hpp"
-
+#include <iostream>
 #include <algorithm>
 #include <stdexcept>
 
@@ -76,6 +76,8 @@ Command parseCommand(const simplejson::JsonValue& json) {
 }
 
 std::vector<Command> parseCommandList(const simplejson::JsonValue& json) {
+    std::cout << json.dump(4) << std::endl;
+    
     std::vector<Command> commands;
     if (json.isArray()) {
         for (const auto& entry : json.asArray()) {

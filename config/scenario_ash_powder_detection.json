@@ -7,6 +7,7 @@
     "type": "yolo11",
     "path": "models/yolo11_traffic.onnx"
   },
+  "mode": "continuous",
   "detection_regions": [
     [
       0,
