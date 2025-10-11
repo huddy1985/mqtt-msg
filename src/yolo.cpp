@@ -55,8 +55,8 @@ std::uint64_t fingerprint(const std::vector<std::uint8_t>& data) {
     return hash;
 }
 
-std::vector<YoloDetection> fallbackDetections(std::uint64_t hash, const std::vector<Region>& hints) {
-    std::vector<YoloDetection> detections;
+std::vector<Detection> fallbackDetections(std::uint64_t hash, const std::vector<Region>& hints) {
+    std::vector<Detection> detections;
     std::size_t count = hints.empty() ? static_cast<std::size_t>((hash % 3ull) + 1ull)
                                       : std::max<std::size_t>(1, hints.size());
     for (std::size_t i = 0; i < count; ++i) {
@@ -75,7 +75,7 @@ std::vector<YoloDetection> fallbackDetections(std::uint64_t hash, const std::vec
         double confidence_seed = static_cast<double>((hash >> (i * 13)) & 0x3FFull) / 1024.0;
         double confidence = std::min(0.98, std::max(0.35, 0.5 + confidence_seed * 0.5));
 
-        YoloDetection detection;
+        Detection detection;
         detection.region = region;
         detection.label = std::string("detected_object_") + std::to_string(i + 1);
         detection.confidence = confidence;
@@ -86,21 +86,19 @@ std::vector<YoloDetection> fallbackDetections(std::uint64_t hash, const std::vec
 
 }  // namespace
 
-YoloModel::YoloModel() = default;
-
-YoloModel::YoloModel(const std::string& model_path) {
-    load(model_path);
+YoloModel::YoloModel(const ModelConfig& config) : Model(std::move(config)), config_(std::move(config)) {
+    load();
 }
 
 YoloModel::~YoloModel() = default;
 
-void YoloModel::load(const std::string& model_path) {
+bool YoloModel::load() {
+    const std::string& model_path = config_.path;
     std::filesystem::path path(model_path);
     if (!std::filesystem::exists(path)) {
         throw std::runtime_error("YOLO model file not found: " + model_path);
     }
 
-    model_path_ = path.generic_string();
     impl_ = std::make_unique<Impl>();
 
 #ifdef APP_HAS_ONNXRUNTIME
@@ -173,10 +171,11 @@ void YoloModel::load(const std::string& model_path) {
 #endif
 
     loaded_ = true;
+    return true;
 }
 
-std::vector<YoloDetection> YoloModel::infer(const CapturedFrame& frame, const std::vector<Region>& hints) const {
-    std::vector<YoloDetection> detections;
+std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const {
+    std::vector<Detection> detections;
     if (!loaded_) {
         return detections;
     }
@@ -305,10 +304,6 @@ std::vector<YoloDetection> YoloModel::infer(const CapturedFrame& frame, const st
         }
     }
 #endif
-
-    if (detections.empty()) {
-        detections = fallbackDetections(frame_hash, hints);
-    }
 
     return detections;
 }

@@ -6,33 +6,28 @@
 
 #include "app/command.hpp"
 #include "app/rtsp.hpp"
+#include "app/model.hpp"
 
 namespace app {
 
-struct YoloDetection {
-    Region region;
-    std::string label;
-    double confidence = 0.0;
-};
-
-class YoloModel {
+class YoloModel : public Model {
 public:
-    YoloModel();
+    YoloModel(const ModelConfig& config);
     explicit YoloModel(const std::string& model_path);
     ~YoloModel();
 
-    void load(const std::string& model_path);
+    bool load();
 
     bool isLoaded() const noexcept { return loaded_; }
-    const std::string& path() const noexcept { return model_path_; }
+    const std::string& path() const noexcept { return config_.path; }
 
-    std::vector<YoloDetection> infer(const CapturedFrame& frame, const std::vector<Region>& hints) const;
+    std::vector<Detection> infer(const CapturedFrame& frame) const;
 
 private:
     struct Impl;
 
     bool loaded_ = false;
-    std::string model_path_;
+    ModelConfig config_;
     std::unique_ptr<Impl> impl_;
 };
 

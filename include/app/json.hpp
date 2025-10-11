@@ -40,6 +40,36 @@ public:
     bool isObject() const { return std::holds_alternative<Object>(data_); }
     bool isArray() const { return std::holds_alternative<Array>(data_); }
 
+    const JsonValue &operator[](const std::string &key) const {
+        const auto &obj = asObject();
+        auto it = obj.find(key);
+        if (it == obj.end()) {
+            throw std::out_of_range("key not found: " + key);
+        }
+        return it->second;
+    }
+
+    JsonValue &operator[](const std::string &key) {
+        auto &obj = asObject();
+        return obj[key];
+    }
+
+    const JsonValue &operator[](std::size_t index) const {
+        const auto &arr = asArray();
+        if (index >= arr.size()) {
+            throw std::out_of_range("array index out of range");
+        }
+        return arr[index];
+    }
+
+    JsonValue &operator[](std::size_t index) {
+        auto &arr = asArray();
+        if (index >= arr.size()) {
+            throw std::out_of_range("array index out of range");
+        }
+        return arr[index];
+    }
+
     bool asBool(bool default_value = false) const {
         if (isBool()) {
             return std::get<bool>(data_);

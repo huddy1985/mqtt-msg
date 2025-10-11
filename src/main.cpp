@@ -20,6 +20,7 @@
 #include <thread>
 #include <vector>
 #include <arpa/inet.h>
+#include <filesystem>
 #include "app/command.hpp"
 #include "app/config.hpp"
 #include "app/mqtt.hpp"
@@ -225,8 +226,11 @@ int main(int argc, char* argv[]) {
     }
 
     try {
+        std::filesystem::path root = std::filesystem::current_path();
         app::AppConfig config = app::loadConfig(configPath);
-        app::ProcessingPipeline pipeline(config);
+        app::ConfigStore store(root.string());
+
+        app::ProcessingPipeline pipeline(config, &store);
         const app::AppConfig& effectiveConfig = pipeline.config();
 
         bool runService = forceService || (!forceOneshot && commandPath.empty());
@@ -312,7 +316,7 @@ int main(int argc, char* argv[]) {
 
                 commandObj["extra"] = command.extra;
 
-                pipeline.setActiveScenarios(command.scenario_ids);
+                pipeline.sync_active_scenarios(command.scenario_ids);
 
                 simplejson::JsonValue scenarioResults = simplejson::makeArray();
                 auto& scenarioResultsArray = scenarioResults.asArray();
@@ -528,7 +532,7 @@ int main(int argc, char* argv[]) {
                                 continue;
                             }
 
-                            pipeline.setActiveScenarios(command.scenario_ids);
+                            pipeline.sync_active_scenarios(command.scenario_ids);
                             std::vector<app::AnalysisResult> analyses;
                             try {
                                 analyses = pipeline.process(command);

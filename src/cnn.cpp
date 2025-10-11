@@ -48,21 +48,20 @@ std::uint64_t fingerprint(const std::vector<std::uint8_t>& data) {
 
 }  // namespace
 
-CnnModel::CnnModel() = default;
-
-CnnModel::CnnModel(const std::string& model_path) {
-    load(model_path);
+CnnModel::CnnModel(const ModelConfig& config): Model(std::move(config)), config_(std::move(config)) {
+    load();
 }
 
 CnnModel::~CnnModel() = default;
 
-void CnnModel::load(const std::string& model_path) {
+bool CnnModel::load() {
+    std::string model_path = config_.path;
+
     std::filesystem::path path(model_path);
     if (!std::filesystem::exists(path)) {
         throw std::runtime_error("CNN model file not found: " + model_path);
     }
 
-    model_path_ = path.generic_string();
     impl_ = std::make_unique<Impl>();
 
 #ifdef APP_HAS_ONNXRUNTIME
@@ -124,10 +123,11 @@ void CnnModel::load(const std::string& model_path) {
 #endif
 
     loaded_ = true;
+    return true;
 }
 
-std::vector<CnnPrediction> CnnModel::infer(const CapturedFrame& frame) const {
-    std::vector<CnnPrediction> predictions;
+std::vector<Detection> CnnModel::infer(const CapturedFrame& frame) const {
+    std::vector<Detection> predictions;
     if (!loaded_ || frame.data.empty()) {
         return predictions;
     }
@@ -196,13 +196,13 @@ std::vector<CnnPrediction> CnnModel::infer(const CapturedFrame& frame) const {
         double scaled = static_cast<double>((hash % 1000ull)) / 1000.0;
         double confidence = 0.55 + std::fmod(scaled, 0.4);
 
-        CnnPrediction prediction;
+        Detection prediction;
         prediction.label = (hash % 2 == 0) ? "normal" : "anomaly";
         prediction.confidence = std::min(0.99, std::max(0.5, confidence));
         predictions.push_back(prediction);
 
         if ((hash % 5ull) == 0ull) {
-            CnnPrediction secondary;
+            Detection secondary;
             secondary.label = prediction.label == "normal" ? "warning" : "normal";
             secondary.confidence = std::max(0.3, 0.8 - prediction.confidence / 2.0);
             predictions.push_back(secondary);

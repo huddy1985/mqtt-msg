@@ -14,6 +14,8 @@ add_executable(mqtt_msg
     src/cnn.cpp
     src/yolo.cpp
     src/mqtt.cpp
+    src/model.cpp
+    src/scenario.cpp
 )
 
 target_include_directories(mqtt_msg PRIVATE include)

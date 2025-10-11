@@ -5,32 +5,28 @@
 #include <vector>
 
 #include "app/rtsp.hpp"
+#include "app/model.hpp"
 
 namespace app {
 
-struct CnnPrediction {
-    std::string label;
-    double confidence = 0.0;
-};
-
-class CnnModel {
+class CnnModel: public Model {
 public:
-    CnnModel();
+    CnnModel(const ModelConfig& config);
     explicit CnnModel(const std::string& model_path);
     ~CnnModel();
 
-    void load(const std::string& model_path);
+    bool load();
 
     bool isLoaded() const noexcept { return loaded_; }
-    const std::string& path() const noexcept { return model_path_; }
+    const std::string& path() const noexcept { return config_.path; }
 
-    std::vector<CnnPrediction> infer(const CapturedFrame& frame) const;
+    std::vector<Detection> infer(const CapturedFrame& frame) const;
 
 private:
     struct Impl;
 
     bool loaded_ = false;
-    std::string model_path_;
+    ModelConfig config_;
     std::unique_ptr<Impl> impl_;
 };
 

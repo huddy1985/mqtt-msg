@@ -155,8 +155,12 @@ std::string saveFrameToDisk(const std::filesystem::path& directory,
 
 }  // namespace
 
-ProcessingPipeline::ProcessingPipeline(AppConfig config)
-    : config_(std::move(config)), frame_grabber_(config_.rtsp) {}
+ProcessingPipeline::ProcessingPipeline(AppConfig config, ConfigStore *store)
+    : config_(std::move(config)), frame_grabber_(config_.rtsp), store_(store) {
+        if (!config_.active_scenarios.empty()) {
+            sync_active_scenarios(config_.active_scenarios);
+        }
+    }
 
 const ScenarioConfig* ProcessingPipeline::findScenario(const std::string& scenario_id) const {
     auto it = config_.scenario_lookup.find(scenario_id);
@@ -170,7 +174,7 @@ const ScenarioConfig* ProcessingPipeline::findScenario(const std::string& scenar
     return &config_.scenarios[index];
 }
 
-void ProcessingPipeline::persistActiveScenarios() const {
+/* void ProcessingPipeline::persistActiveScenarios() const {
     if (config_.source_path.empty()) {
         return;
     }
@@ -217,9 +221,9 @@ void ProcessingPipeline::persistActiveScenarios() const {
     } catch (const std::exception& ex) {
         std::cerr << "Failed to persist scenario activation state: " << ex.what() << "\n";
     }
-}
+} */
 
-void ProcessingPipeline::setActiveScenarios(const std::vector<std::string>& scenario_ids) {
+/* void ProcessingPipeline::setActiveScenarios(const std::vector<std::string>& scenario_ids) {
     std::vector<bool> desired(config_.scenarios.size(), false);
     for (const auto& id : scenario_ids) {
         auto it = config_.scenario_lookup.find(id);
@@ -239,6 +243,57 @@ void ProcessingPipeline::setActiveScenarios(const std::vector<std::string>& scen
 
     if (changed) {
         persistActiveScenarios();
+    }
+} */
+
+void ProcessingPipeline::sync_active_scenarios(const std::vector<std::string> &scenario_ids) {
+    remove_inactive(scenario_ids);
+    add_missing(scenario_ids);
+    config_.active_scenarios = scenario_ids;
+}
+
+void ProcessingPipeline::remove_inactive(const std::vector<std::string> &scenario_ids) {
+    std::vector<std::string> to_remove;
+    for (const auto &kv : active_scenarios_) {
+        if (std::find(scenario_ids.begin(), scenario_ids.end(), kv.first) == scenario_ids.end()) {
+            to_remove.push_back(kv.first);
+        }
+    }
+    for (const auto &id : to_remove) {
+        std::cout << "Deactivating scenario " << id << "\n";
+        active_scenarios_.erase(id);
+    }
+}
+
+void ProcessingPipeline::add_missing(const std::vector<std::string> &scenario_ids) {
+    for (const auto &id : scenario_ids) {
+        if (active_scenarios_.find(id) != active_scenarios_.end()) {
+            continue;
+        }
+        if (!store_) {
+            std::cerr << "No configuration store available to load scenario " << id << "\n";
+            continue;
+        }
+        auto path_it = config_.scenario_files.find(id);
+        if (path_it == config_.scenario_files.end()) {
+            std::cerr << "Scenario " << id << " not found in configuration map\n";
+            continue;
+        }
+        try {
+            ScenarioDefinition def = store_->load_scenario_file(path_it->second);
+            if (def.id.empty()) {
+                def.id = id;
+            }
+            auto scenario = std::make_unique<Scenario>(def, path_it->second);
+            if (!scenario->load_models()) {
+                std::cerr << "Failed to load models for scenario " << id << "\n";
+                continue;
+            }
+            std::cout << "Activating scenario " << id << "\n";
+            active_scenarios_.emplace(id, std::move(scenario));
+        } catch (const std::exception &ex) {
+            std::cerr << "Error loading scenario " << id << ": " << ex.what() << "\n";
+        }
     }
 }
 
@@ -279,9 +334,11 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
 
         std::unique_ptr<CnnModel> cnnModel;
         std::unique_ptr<YoloModel> yoloModel;
+
+        ModelConfig _config;
         if (useCnn) {
             try {
-                cnnModel = std::make_unique<CnnModel>(result.model.path);
+                cnnModel = std::make_unique<CnnModel>(_config);
             } catch (const std::exception& ex) {
                 std::cerr << "CNN model load failed: " << ex.what() << "\n";
             }
@@ -290,7 +347,7 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
             }
         } else if (useYolo) {
             try {
-                yoloModel = std::make_unique<YoloModel>(result.model.path);
+                yoloModel = std::make_unique<YoloModel>(_config);
             } catch (const std::exception& ex) {
                 std::cerr << "YOLO model load failed: " << ex.what() << "\n";
             }
@@ -337,7 +394,7 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
 
                 auto predictions = cnnModel->infer(*frameData);
                 if (predictions.empty()) {
-                    predictions.push_back(CnnPrediction{"unknown", 0.0});
+                    predictions.push_back(Detection{"unknown"});
                 }
 
                 for (std::size_t detIndex = 0; detIndex < predictions.size(); ++detIndex) {
@@ -367,7 +424,7 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
                     frameData = &synthetic;
                 }
 
-                auto detections = yoloModel->infer(*frameData, regions);
+                auto detections = yoloModel->infer(*frameData);
                 for (const auto& yoloDet : detections) {
                     Region region = yoloDet.region;
                     bool filtered = isFiltered(region, command.filter_regions);
