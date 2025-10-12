@@ -317,13 +317,14 @@ int main(int argc, char* argv[]) {
 
             simplejson::JsonValue resultsValue = simplejson::makeArray();
             auto& resultsArray = resultsValue.asArray();
+
             for (const auto& command : commands) {
                 simplejson::JsonValue commandResult = simplejson::makeObject();
                 auto& commandObj = commandResult.asObject();
 
                 simplejson::JsonValue scenarioIds = simplejson::makeArray();
                 auto& scenarioArray = scenarioIds.asArray();
-                for (const auto& scenarioId : command.scenario_ids) {
+                for (const auto& scenarioId : command.scenario_id) {
                     scenarioArray.push_back(scenarioId);
                 }
 
@@ -366,8 +367,6 @@ int main(int argc, char* argv[]) {
                 }
 
                 commandObj["extra"] = command.extra;
-
-                pipeline.sync_active_scenarios(command.scenario_ids);
 
                 simplejson::JsonValue scenarioResults = simplejson::makeArray();
                 auto& scenarioResultsArray = scenarioResults.asArray();
@@ -445,6 +444,14 @@ int main(int argc, char* argv[]) {
             }
 
             std::vector<app::Command> commands = app::parseCommandList(*commandSource);
+            for (const auto& command: commands) {
+                if (command.action == "enable") {
+                    pipeline.add_missing(command.scenario_id);
+                } else if (command.action == "disable") {
+                    pipeline.remove_inactive(command.scenario_id);
+                }
+            }
+
             if (commands.empty()) {
                 {
                     std::lock_guard<std::mutex> lock(session_mutex);
@@ -481,6 +488,7 @@ int main(int argc, char* argv[]) {
                 active_session = session;
                 session_version.fetch_add(1, std::memory_order_relaxed);
             }
+
             session_cv.notify_all();
 
             simplejson::JsonValue response = simplejson::makeObject();
@@ -502,18 +510,19 @@ int main(int argc, char* argv[]) {
 
             simplejson::JsonValue commandArray = simplejson::makeArray();
             auto& array = commandArray.asArray();
+            
             for (const auto& command : commands) {
                 simplejson::JsonValue commandJson = simplejson::makeObject();
                 auto& commandObj = commandJson.asObject();
 
                 simplejson::JsonValue scenarioIds = simplejson::makeArray();
                 auto& scenarioArray = scenarioIds.asArray();
-                for (const auto& scenarioId : command.scenario_ids) {
-                    scenarioArray.push_back(scenarioId);
-                }
+                scenarioArray.push_back(command.scenario_id);
+
                 commandObj["scenario_ids"] = scenarioIds;
                 commandObj["threshold"] = command.threshold;
                 commandObj["fps"] = command.fps;
+
                 if (!command.activation_code.empty()) {
                     commandObj["activation_code"] = command.activation_code;
                 }
@@ -584,12 +593,15 @@ int main(int argc, char* argv[]) {
                             if (monitor_stop.load() || session_version.load() != version) {
                                 break;
                             }
-                            if (command.scenario_ids.empty()) {
+                            
+                            if (command.scenario_id.empty()) {
                                 continue;
                             }
 
-                            pipeline.sync_active_scenarios(command.scenario_ids);
+                            continue;
+
                             std::vector<app::AnalysisResult> analyses;
+
                             try {
                                 analyses = pipeline.process(command);
                             } catch (const std::exception& ex) {

@@ -87,7 +87,7 @@ std::vector<Detection> fallbackDetections(std::uint64_t hash, const std::vector<
 }  // namespace
 
 YoloModel::YoloModel(const ScenarioDefinition& config) : Model(std::move(config)), config_(std::move(config)) {
-    load();
+
 }
 
 YoloModel::~YoloModel() = default;
@@ -161,6 +161,24 @@ bool YoloModel::load() {
     loaded_ = true;
     return true;
 }
+
+bool YoloModel::release() {
+    if (impl_) {
+        impl_->input_names.clear();
+        impl_->input_name_ptrs.clear();
+        impl_->output_names.clear();
+        impl_->output_name_ptrs.clear();
+
+        impl_->input_shape.clear();
+        impl_->session.reset(); 
+    }
+
+    loaded_ = false;
+    std::cout << "Model resources have been released successfully.\n";
+
+    return loaded_;
+}
+
 
 std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const {
     std::vector<Detection> detections;

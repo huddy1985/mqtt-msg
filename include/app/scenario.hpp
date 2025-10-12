@@ -19,6 +19,8 @@ public:
     double threshold() const { return definition_.threshold; }
 
     bool load_models();
+    bool release_models();
+    
     std::vector<Detection> analyze(const CapturedFrame& frame);
 
 private:

@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <stdexcept>
 #include <string>
+#include <iostream>
 #include <vector>
 
 #ifdef APP_HAS_ONNXRUNTIME
@@ -115,6 +116,25 @@ bool CnnModel::load() {
     loaded_ = true;
     return true;
 }
+
+bool CnnModel::release() {
+    if (impl_) {
+        impl_->input_names.clear();
+        impl_->input_name_ptrs.clear();
+        impl_->output_names.clear();
+        impl_->output_name_ptrs.clear();
+
+        impl_->input_shape.clear();
+
+        impl_->session.reset();
+    }
+
+    loaded_ = false;
+    std::cout << "CNN model resources have been released successfully.\n";
+
+    return loaded_;
+}
+
 
 std::vector<Detection> CnnModel::infer(const CapturedFrame& frame) const {
     std::vector<Detection> predictions;

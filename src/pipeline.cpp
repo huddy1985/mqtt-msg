@@ -157,9 +157,6 @@ std::string saveFrameToDisk(const std::filesystem::path& directory,
 
 ProcessingPipeline::ProcessingPipeline(AppConfig config, ConfigStore *store)
     : config_(std::move(config)), frame_grabber_(config_.rtsp), store_(store) {
-        if (!config_.active_scenarios.empty()) {
-            sync_active_scenarios(config_.active_scenarios);
-        }
     }
 
 const ScenarioConfig* ProcessingPipeline::findScenario(const std::string& scenario_id) const {
@@ -246,220 +243,217 @@ const ScenarioConfig* ProcessingPipeline::findScenario(const std::string& scenar
     }
 } */
 
-void ProcessingPipeline::sync_active_scenarios(const std::vector<std::string> &scenario_ids) {
-    remove_inactive(scenario_ids);
-    add_missing(scenario_ids);
-    config_.active_scenarios = scenario_ids;
-}
-
-void ProcessingPipeline::remove_inactive(const std::vector<std::string> &scenario_ids) {
+void ProcessingPipeline::remove_inactive(const std::string &scenario_id) {
     std::vector<std::string> to_remove;
+
     for (const auto &kv : active_scenarios_) {
-        if (std::find(scenario_ids.begin(), scenario_ids.end(), kv.first) == scenario_ids.end()) {
+        if (kv.first == scenario_id) {
             to_remove.push_back(kv.first);
         }
     }
     for (const auto &id : to_remove) {
-        std::cout << "Deactivating scenario " << id << "\n";
+        auto scenario = active_scenarios_.find(id);
+        if (scenario != active_scenarios_.end()) {
+            scenario->second->release_models();
+        }
         active_scenarios_.erase(id);
+        std::cout << "Deactivating scenario " << id << "\n";
     }
 }
 
-void ProcessingPipeline::add_missing(const std::vector<std::string> &scenario_ids) {
-    for (const auto &id : scenario_ids) {
-        if (active_scenarios_.find(id) != active_scenarios_.end()) {
-            continue;
-        }
-        if (!store_) {
-            std::cerr << "No configuration store available to load scenario " << id << "\n";
-            continue;
-        }
+void ProcessingPipeline::add_missing(const std::string &scenario_id) {
+    if (active_scenarios_.find(scenario_id) != active_scenarios_.end()) {
+        return;
+    }
 
-        auto path_it = config_.scenarios.begin();
+    if (!store_) {
+        std::cerr << "No configuration store available to load scenario " << scenario_id << "\n";
+        return;
+    }
 
-        for (; path_it != config_.scenarios.end(); path_it++) {
-            if (path_it->id == id) {
-                break;
-            }
+    auto path_it = config_.scenarios.begin();
+
+    for (; path_it != config_.scenarios.end(); path_it++) {
+        if (path_it->id == scenario_id) {
+            break;
         }
-        
-        if (path_it == config_.scenarios.end()) {
-            std::cerr << "Scenario " << id << " not found in configuration map\n";
-            continue;
+    }
+    
+    if (path_it == config_.scenarios.end()) {
+        std::cerr << "Scenario " << scenario_id << " not found in configuration map\n";
+        return;
+    }
+    try {
+        ScenarioDefinition def = store_->load_scenario_file(path_it->config_path);
+        if (def.id.empty()) {
+            def.id = scenario_id;
         }
-        try {
-            ScenarioDefinition def = store_->load_scenario_file(path_it->config_path);
-            if (def.id.empty()) {
-                def.id = id;
-            }
-            auto scenario = std::make_unique<Scenario>(def, path_it->config_path);
-            if (!scenario->load_models()) {
-                std::cerr << "Failed to load models for scenario " << id << "\n";
-                continue;
-            }
-            std::cout << "Activating scenario " << id << "\n";
-            active_scenarios_.emplace(id, std::move(scenario));
-        } catch (const std::exception &ex) {
-            std::cerr << "Error loading scenario " << id << ": " << ex.what() << "\n";
+        auto scenario = std::make_unique<Scenario>(def, path_it->config_path);
+        if (!scenario->load_models()) {
+            std::cerr << "Failed to load models for scenario " << scenario_id << "\n";
+            return;
         }
+        std::cout << "Successful activate scenario " << scenario_id << "\n";
+        active_scenarios_.emplace(scenario_id, std::move(scenario));
+    } catch (const std::exception &ex) {
+        std::cerr << "Error loading scenario " << scenario_id << ": " << ex.what() << "\n";
     }
 }
 
 std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) {
-    if (command.scenario_ids.empty()) {
+    if (command.scenario_id.empty()) {
         throw std::runtime_error("Command must define at least one scenario");
     }
 
     std::vector<AnalysisResult> results;
-    results.reserve(command.scenario_ids.size());
-
-    for (const auto& scenarioId : command.scenario_ids) {
-        const ScenarioConfig* scenarioConfig = findScenario(scenarioId);
-        if (!scenarioConfig) {
-            throw std::runtime_error("Unknown scenario: " + scenarioId);
-        }
-
-        if (!scenarioConfig->active) {
-            std::cerr << "Skipping inactive scenario: " << scenarioConfig->id << "\n";
-            continue;
-        }
-
-        auto active_scenario = active_scenarios_.find(scenarioId);
-        if (active_scenario == active_scenarios_.end()) {
-            continue;
-        }
-
-        AnalysisResult result;
-        result.scenario_id = scenarioConfig->id;
-        result.model = scenarioConfig->model;
-
-        double fps = command.fps > 0.0 ? command.fps : 1.0;
-        double interval = 1.0 / fps;
-
-        std::vector<Region> regions = command.detection_regions;
-        if (regions.empty()) {
-            regions.push_back(Region{0, 0, 0, 0});
-        }
-
-        bool useCnn = (result.model.type == "cnn");
-        bool useYolo = (!useCnn && result.model.type.rfind("yolo", 0) == 0);
-        std::size_t frameCount = regions.size();
-
-        std::unique_ptr<CnnModel> cnnModel;
-        std::unique_ptr<YoloModel> yoloModel;
-
-        ScenarioDefinition _config;
-        if (useCnn) {
-            try {
-                cnnModel = std::make_unique<CnnModel>(_config);
-            } catch (const std::exception& ex) {
-                std::cerr << "CNN model load failed: " << ex.what() << "\n";
-            }
-            if (!frameCount) {
-                frameCount = 1;
-            }
-        } else if (useYolo) {
-            try {
-                yoloModel = std::make_unique<YoloModel>(_config);
-            } catch (const std::exception& ex) {
-                std::cerr << "YOLO model load failed: " << ex.what() << "\n";
-            }
-            if (!frameCount) {
-                frameCount = 1;
-            }
-        }
-
-        std::vector<CapturedFrame> capturedFrames;
-        try {
-            capturedFrames = frame_grabber_.capture(fps, frameCount, std::chrono::milliseconds(5000));
-        } catch (const std::exception& ex) {
-            std::cerr << "RTSP capture failed: " << ex.what() << "\n";
-        }
-
-        std::filesystem::path captureDir = ensureCaptureDirectory(config_.service.name, scenarioConfig->id);
-
-        for (std::size_t index = 0; index < frameCount; ++index) {
-            FrameResult frame;
-            if (index < capturedFrames.size()) {
-                frame.timestamp = capturedFrames[index].timestamp;
-                std::string path = saveFrameToDisk(captureDir, index, capturedFrames[index]);
-                frame.image_path = path;
-            } else {
-                frame.timestamp = index * interval;
-            }
-
-            if (useCnn && cnnModel && cnnModel->isLoaded()) {
-                const CapturedFrame* frameData = (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
-                CapturedFrame synthetic;
-                if (!frameData) {
-                    synthetic.timestamp = frame.timestamp;
-                    synthetic.format = "synthetic";
-                    synthetic.data.reserve(regions.size() * 4 + scenarioConfig->id.size());
-                    for (const auto& region : regions) {
-                        synthetic.data.push_back(static_cast<std::uint8_t>((region.x1 + region.y1) & 0xFF));
-                        synthetic.data.push_back(static_cast<std::uint8_t>((region.x2 + region.y2) & 0xFF));
-                    }
-                    for (char ch : scenarioConfig->id) {
-                        synthetic.data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
-                    }
-                    frameData = &synthetic;
-                }
-
-                auto predictions = cnnModel->infer(*frameData);
-                if (predictions.empty()) {
-                    predictions.push_back(Detection{"unknown"});
-                }
-
-                for (std::size_t detIndex = 0; detIndex < predictions.size(); ++detIndex) {
-                    Region region = detIndex < regions.size() ? regions[detIndex] : Region{0, 0, 0, 0};
-                    bool filtered = isFiltered(region, command.filter_regions);
-                    DetectionResult detection;
-                    detection.region = region;
-                    detection.filtered = filtered;
-                    detection.label = predictions[detIndex].label;
-                    detection.confidence = predictions[detIndex].confidence;
-                    frame.detections.push_back(std::move(detection));
-                }
-            } else if (useYolo && yoloModel && yoloModel->isLoaded()) {
-                const CapturedFrame* frameData = (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
-                CapturedFrame synthetic;
-                if (!frameData) {
-                    synthetic.timestamp = frame.timestamp;
-                    synthetic.format = "synthetic";
-                    synthetic.data.reserve(regions.size() * 4 + scenarioConfig->id.size());
-                    for (const auto& region : regions) {
-                        synthetic.data.push_back(static_cast<std::uint8_t>((region.x1 ^ region.y2) & 0xFF));
-                        synthetic.data.push_back(static_cast<std::uint8_t>((region.x2 ^ region.y1) & 0xFF));
-                    }
-                    for (char ch : scenarioConfig->id) {
-                        synthetic.data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
-                    }
-                    frameData = &synthetic;
-                }
-
-                auto detections = yoloModel->infer(*frameData);
-                for (const auto& yoloDet : detections) {
-                    Region region = yoloDet.region;
-                    bool filtered = isFiltered(region, command.filter_regions);
-                    DetectionResult detection;
-                    detection.region = region;
-                    detection.filtered = filtered;
-                    detection.label = yoloDet.label;
-                    detection.confidence = yoloDet.confidence;
-                    frame.detections.push_back(std::move(detection));
-                }
-            } else {
-                const auto& region = regions[index % regions.size()];
-                bool filtered = isFiltered(region, command.filter_regions);
-                DetectionResult detection = makeDetection(region, result.model, command.threshold, filtered);
-                frame.detections.push_back(detection);
-            }
-
-            result.frames.push_back(std::move(frame));
-        }
-
-        results.push_back(std::move(result));
+    results.reserve(1);
+    auto scenarioId = command.scenario_id;
+    
+    const ScenarioConfig* scenarioConfig = findScenario(scenarioId);
+    if (!scenarioConfig) {
+        throw std::runtime_error("Unknown scenario: " + scenarioId);
     }
+
+    if (!scenarioConfig->active) {
+        std::cerr << "Skipping inactive scenario: " << scenarioConfig->id << "\n";
+        return results;
+    }
+
+    auto active_scenario = active_scenarios_.find(scenarioId);
+    if (active_scenario == active_scenarios_.end()) {
+        return results;
+    }
+
+    AnalysisResult result;
+    result.scenario_id = scenarioConfig->id;
+    result.model = scenarioConfig->model;
+
+    double fps = command.fps > 0.0 ? command.fps : 1.0;
+    double interval = 1.0 / fps;
+
+    std::vector<Region> regions = command.detection_regions;
+    if (regions.empty()) {
+        regions.push_back(Region{0, 0, 0, 0});
+    }
+
+    bool useCnn = (result.model.type == "cnn");
+    bool useYolo = (!useCnn && result.model.type.rfind("yolo", 0) == 0);
+    std::size_t frameCount = regions.size();
+
+    std::unique_ptr<CnnModel> cnnModel;
+    std::unique_ptr<YoloModel> yoloModel;
+
+    ScenarioDefinition _config;
+    if (useCnn) {
+        try {
+            cnnModel = std::make_unique<CnnModel>(_config);
+        } catch (const std::exception& ex) {
+            std::cerr << "CNN model load failed: " << ex.what() << "\n";
+        }
+        if (!frameCount) {
+            frameCount = 1;
+        }
+    } else if (useYolo) {
+        try {
+            yoloModel = std::make_unique<YoloModel>(_config);
+        } catch (const std::exception& ex) {
+            std::cerr << "YOLO model load failed: " << ex.what() << "\n";
+        }
+        if (!frameCount) {
+            frameCount = 1;
+        }
+    }
+
+    std::vector<CapturedFrame> capturedFrames;
+    try {
+        capturedFrames = frame_grabber_.capture(fps, frameCount, std::chrono::milliseconds(5000));
+    } catch (const std::exception& ex) {
+        std::cerr << "RTSP capture failed: " << ex.what() << "\n";
+    }
+
+    std::filesystem::path captureDir = ensureCaptureDirectory(config_.service.name, scenarioConfig->id);
+
+    for (std::size_t index = 0; index < frameCount; ++index) {
+        FrameResult frame;
+        if (index < capturedFrames.size()) {
+            frame.timestamp = capturedFrames[index].timestamp;
+            std::string path = saveFrameToDisk(captureDir, index, capturedFrames[index]);
+            frame.image_path = path;
+        } else {
+            frame.timestamp = index * interval;
+        }
+
+        if (useCnn && cnnModel && cnnModel->isLoaded()) {
+            const CapturedFrame* frameData = (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
+            CapturedFrame synthetic;
+            if (!frameData) {
+                synthetic.timestamp = frame.timestamp;
+                synthetic.format = "synthetic";
+                synthetic.data.reserve(regions.size() * 4 + scenarioConfig->id.size());
+                for (const auto& region : regions) {
+                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x1 + region.y1) & 0xFF));
+                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x2 + region.y2) & 0xFF));
+                }
+                for (char ch : scenarioConfig->id) {
+                    synthetic.data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
+                }
+                frameData = &synthetic;
+            }
+
+            auto predictions = cnnModel->infer(*frameData);
+            if (predictions.empty()) {
+                predictions.push_back(Detection{"unknown"});
+            }
+
+            for (std::size_t detIndex = 0; detIndex < predictions.size(); ++detIndex) {
+                Region region = detIndex < regions.size() ? regions[detIndex] : Region{0, 0, 0, 0};
+                bool filtered = isFiltered(region, command.filter_regions);
+                DetectionResult detection;
+                detection.region = region;
+                detection.filtered = filtered;
+                detection.label = predictions[detIndex].label;
+                detection.confidence = predictions[detIndex].confidence;
+                frame.detections.push_back(std::move(detection));
+            }
+        } else if (useYolo && yoloModel && yoloModel->isLoaded()) {
+            const CapturedFrame* frameData = (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
+            CapturedFrame synthetic;
+            if (!frameData) {
+                synthetic.timestamp = frame.timestamp;
+                synthetic.format = "synthetic";
+                synthetic.data.reserve(regions.size() * 4 + scenarioConfig->id.size());
+                for (const auto& region : regions) {
+                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x1 ^ region.y2) & 0xFF));
+                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x2 ^ region.y1) & 0xFF));
+                }
+                for (char ch : scenarioConfig->id) {
+                    synthetic.data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
+                }
+                frameData = &synthetic;
+            }
+
+            auto detections = yoloModel->infer(*frameData);
+            for (const auto& yoloDet : detections) {
+                Region region = yoloDet.region;
+                bool filtered = isFiltered(region, command.filter_regions);
+                DetectionResult detection;
+                detection.region = region;
+                detection.filtered = filtered;
+                detection.label = yoloDet.label;
+                detection.confidence = yoloDet.confidence;
+                frame.detections.push_back(std::move(detection));
+            }
+        } else {
+            const auto& region = regions[index % regions.size()];
+            bool filtered = isFiltered(region, command.filter_regions);
+            DetectionResult detection = makeDetection(region, result.model, command.threshold, filtered);
+            frame.detections.push_back(detection);
+        }
+
+        result.frames.push_back(std::move(frame));
+    }
+
+    results.push_back(std::move(result));
 
     return results;
 }

@@ -11,10 +11,6 @@ namespace app {
 
 Model::Model(ScenarioDefinition config) : config_(std::move(config)) {}
 
-bool Model::load() {
-    return true;
-}
-
 std::unique_ptr<Model> create_model(const ScenarioDefinition &config) {
     if (config.model.type.rfind("cnn") != std::string::npos) {
         return std::make_unique<CnnModel>(config);

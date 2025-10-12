@@ -20,6 +20,18 @@ bool Scenario::load_models() {
     return true;
 }
 
+bool Scenario::release_models() {
+    if (!model_) {
+        std::cerr << "Model is not loaded " << definition_.id << "\n";
+        return false;
+    }
+    if (model_->release()) {
+        std::cerr << "Failed to load model " << definition_.id << "\n";
+        return false;
+    }
+    return true;
+}
+
 std::vector<Detection> Scenario::analyze(const CapturedFrame &frame) {
     std::vector<Detection> results;
     double scenario_threshold = definition_.threshold;

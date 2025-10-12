@@ -16,6 +16,7 @@ public:
     ~CnnModel();
 
     bool load();
+    bool release();
 
     bool isLoaded() const noexcept { return loaded_; }
     const std::string& path() const noexcept { return config_.model.path; }

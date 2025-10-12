@@ -34,15 +34,11 @@ Command parseCommand(const simplejson::JsonValue& json) {
     }
 
     const auto& scenarioValue = json.at("scenario_id");
-    if (scenarioValue.isArray()) {
-        for (const auto& entry : scenarioValue.asArray()) {
-            command.scenario_ids.push_back(entry.asString());
-        }
-    } else {
-        command.scenario_ids.push_back(scenarioValue.asString());
+    if (scenarioValue.isString()) {
+        command.scenario_id = scenarioValue.asString();
     }
 
-    if (command.scenario_ids.empty()) {
+    if (command.scenario_id.empty()) {
         throw std::runtime_error("scenario_id must not be empty");
     }
 
@@ -61,8 +57,13 @@ Command parseCommand(const simplejson::JsonValue& json) {
     if (json.contains("fps")) {
         command.fps = json.at("fps").asNumber();
     }
+
     if (json.contains("activation_code")) {
         command.activation_code = json.at("activation_code").asString();
+    }
+
+    if (json.contains("action")) {
+        command.action = json.at("action").asString();
     }
 
     if (json.contains("model")) {

@@ -35,17 +35,15 @@ class ProcessingPipeline {
 public:
     explicit ProcessingPipeline(AppConfig config, ConfigStore *store);
 
-    void sync_active_scenarios(const std::vector<std::string> &scenario_ids);
-
     std::vector<AnalysisResult> process(const Command& command);
 
     const AppConfig& config() const { return config_; }
 
+    void remove_inactive(const std::string &scenario_id);
+    void add_missing(const std::string &scenario_id);
+
 private:
     const ScenarioConfig* findScenario(const std::string& scenario_id) const;
-
-    void remove_inactive(const std::vector<std::string> &scenario_ids);
-    void add_missing(const std::vector<std::string> &scenario_ids);
 
 private:
     AppConfig config_;
