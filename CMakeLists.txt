@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
-project(mqtt_msg LANGUAGES CXX)
+project(InspectAI LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(mqtt_msg
+add_executable(InspectAI
     src/main.cpp
     src/config.cpp
     src/command.cpp
@@ -19,7 +19,7 @@ add_executable(mqtt_msg
 	src/common.cpp
 )
 
-target_include_directories(mqtt_msg PRIVATE include)
+target_include_directories(InspectAI PRIVATE include)
 
 set(ONNXRUNTIME_HINT_DIRS
     $ENV{ONNXRUNTIME_ROOT}
@@ -39,9 +39,9 @@ find_library(ONNXRUNTIME_LIBRARY
 )
 
 if (ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIBRARY)
-    target_compile_definitions(mqtt_msg PRIVATE APP_HAS_ONNXRUNTIME)
-    target_include_directories(mqtt_msg PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
-    target_link_libraries(mqtt_msg PRIVATE ${ONNXRUNTIME_LIBRARY})
+    target_compile_definitions(InspectAI PRIVATE APP_HAS_ONNXRUNTIME)
+    target_include_directories(InspectAI PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+    target_link_libraries(InspectAI PRIVATE ${ONNXRUNTIME_LIBRARY})
 endif()
 
 find_package(PkgConfig QUIET)
@@ -66,11 +66,11 @@ if (NOT MOSQUITTO_FOUND)
 endif()
 
 find_package(Threads REQUIRED)
-target_link_libraries(mqtt_msg PRIVATE Threads::Threads)
+target_link_libraries(InspectAI PRIVATE Threads::Threads)
 
 if (MOSQUITTO_FOUND)
-    target_compile_definitions(mqtt_msg PRIVATE APP_HAS_MOSQUITTO)
-    target_include_directories(mqtt_msg PRIVATE ${MOSQUITTO_INCLUDE_DIRS})
-    target_link_libraries(mqtt_msg PRIVATE ${MOSQUITTO_LIBRARIES})
+    target_compile_definitions(InspectAI PRIVATE APP_HAS_MOSQUITTO)
+    target_include_directories(InspectAI PRIVATE ${MOSQUITTO_INCLUDE_DIRS})
+    target_link_libraries(InspectAI PRIVATE ${MOSQUITTO_LIBRARIES})
 endif()
 
