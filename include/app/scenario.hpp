@@ -24,7 +24,7 @@ public:
 private:
     ScenarioDefinition definition_;
     std::string config_path_;
-    std::vector<std::unique_ptr<Model>> models_;
+    std::unique_ptr<Model> model_;
 };
 
 } // namespace app

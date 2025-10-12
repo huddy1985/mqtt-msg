@@ -293,33 +293,44 @@ ModelConfig parse_model_config(const simplejson::JsonValue &node) {
     if (node.contains("path")) {
         model.path = node["path"].asString();
     }
-    if (node.contains("threshold")) {
-        model.threshold = node["threshold"].asNumber();
-    }
-    if (node.contains("labels")) {
-        for (const auto &label : node["labels"].asArray()) {
-            model.labels.push_back(label.asString());
-        }
-    }
+
     return model;
 }
 
 ScenarioDefinition parse_scenario_definition(const simplejson::JsonValue &root) {
     ScenarioDefinition def;
-    if (root.contains("id")) {
-        def.id = root["id"].asString();
+    if (root.contains("scenario_id")) {
+        def.id = root["scenario_id"].asString();
     }
+
     if (root.contains("name")) {
         def.name = root["name"].asString();
     }
-    if (root.contains("threshold")) {
-        def.threshold = root["threshold"].asNumber();
+
+    if (root.contains("description")) {
+        def.description = root["description"].asString();
     }
-    if (root.contains("models")) {
-        for (const auto &model : root["models"].asArray()) {
-            def.models.push_back(parse_model_config(model));
-        }
+
+    if (root.contains("model")) {
+        def.model = parse_model_config(root["model"]);
     }
+
+    if (root.contains("mode")) {
+        def.mode = root["mode"].asString();
+    }
+
+    if (root.contains("detection_regions")) {
+        def.detection_regions = parseRegions(root["detection_regions"].asArray());
+    }
+
+    if (root.contains("filter_regions")) {
+        def.filter_regions = parseRegions(root["filter_regions"].asArray());
+    }
+
+    if (root.contains("confidence_threshold")) {
+        def.threshold = root["confidence_threshold"].asNumber();
+    }
+
     return def;
 }
 

@@ -5,14 +5,10 @@
 #include <vector>
 
 #include "app/json.hpp"
+#include "app/command.hpp"
+#include "app/common.hpp"
 
 namespace app {
-
-struct ModelInfo {
-    std::string id;
-    std::string type;
-    std::string path;
-};
 
 struct ScenarioConfig {
     std::string id;
@@ -49,15 +45,19 @@ struct ModelConfig {
     std::string id;
     std::string type; // "cnn" or "yolo"
     std::string path;
-    double threshold{0.5};
-    std::vector<std::string> labels;
 };
 
 struct ScenarioDefinition {
     std::string id;
     std::string name;
+    std::string description;
+    std::string mode;
+
+    std::vector<app::Region> detection_regions;
+    std::vector<app::Region> filter_regions;
+
     double threshold{0.5};
-    std::vector<ModelConfig> models;
+    ModelConfig model;
 };
 
 struct AppConfig {

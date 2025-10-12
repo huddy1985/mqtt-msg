@@ -21,6 +21,13 @@
 #include <vector>
 #include <arpa/inet.h>
 #include <filesystem>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <sys/ioctl.h>
+#include <arpa/inet.h>
+#include <unistd.h> 
+
 #include "app/command.hpp"
 #include "app/config.hpp"
 #include "app/mqtt.hpp"
@@ -86,6 +93,49 @@ std::string detectLocalIp() {
     return result;
 }
 
+std::string detectLocalMac() {
+    std::string fallback = "00:00:00:00:00:00";
+    struct ifaddrs* ifaddr = nullptr;
+    if (getifaddrs(&ifaddr) != 0 || !ifaddr) {
+        return fallback;
+    }
+
+    std::string mac = fallback;
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        freeifaddrs(ifaddr);
+        return fallback;
+    }
+
+    for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr)
+            continue;
+
+        if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK))
+            continue;
+
+        if (ifa->ifa_addr->sa_family == AF_INET) {
+            struct ifreq ifr {};
+            std::strncpy(ifr.ifr_name, ifa->ifa_name, IFNAMSIZ - 1);
+            if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {
+                unsigned char* hw = reinterpret_cast<unsigned char*>(ifr.ifr_hwaddr.sa_data);
+                std::ostringstream oss;
+                oss << std::hex << std::setfill('0');
+                for (int i = 0; i < 6; ++i) {
+                    oss << std::setw(2) << static_cast<int>(hw[i]);
+                    if (i < 5) oss << ":";
+                }
+                mac = oss.str();
+                break;
+            }
+        }
+    }
+
+    close(sock);
+    freeifaddrs(ifaddr);
+    return mac;
+}
+
 simplejson::JsonValue buildServiceSnapshot(const app::AppConfig& config, const std::string& localIp) {
     simplejson::JsonValue root = simplejson::makeObject();
     auto& obj = root.asObject();
@@ -99,6 +149,7 @@ simplejson::JsonValue buildServiceSnapshot(const app::AppConfig& config, const s
     obj["subscribe_topic"] = config.mqtt.subscribe_topic;
     obj["publish_topic"] = config.mqtt.publish_topic;
     obj["local_ip"] = localIp;
+
     simplejson::JsonValue rtsp = simplejson::makeObject();
     auto& rtspObj = rtsp.asObject();
     rtspObj["host"] = config.rtsp.host;
@@ -339,6 +390,8 @@ int main(int argc, char* argv[]) {
             return buildServiceSnapshot(effectiveConfig, localIp);
         };
 
+        std::string localMac = detectLocalMac();
+
         std::mutex session_mutex;
         std::condition_variable session_cv;
         std::shared_ptr<MonitoringSession> active_session;
@@ -352,7 +405,8 @@ int main(int argc, char* argv[]) {
                           &active_session,
                           &session_version](const simplejson::JsonValue& payload, std::string& responseTopic) {
             
-                            std::cout << "=== processor ===" << std::endl;
+            std::cout << "=== processor ===" << std::endl;
+            std::cout << payload.dump(4) << std::endl;
 
             const simplejson::JsonValue* commandSource = &payload;
             std::string requestId;
@@ -369,10 +423,12 @@ int main(int argc, char* argv[]) {
                         responseTopic.clear();
                     }
                 }
+
                 auto cmdIt = obj.find("commands");
                 if (cmdIt != obj.end()) {
                     commandSource = &cmdIt->second;
                 }
+
                 auto requestIt = obj.find("request_id");
                 if (requestIt != obj.end()) {
                     try {

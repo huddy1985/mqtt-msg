@@ -86,14 +86,21 @@ std::vector<Detection> fallbackDetections(std::uint64_t hash, const std::vector<
 
 }  // namespace
 
-YoloModel::YoloModel(const ModelConfig& config) : Model(std::move(config)), config_(std::move(config)) {
+YoloModel::YoloModel(const ScenarioDefinition& config) : Model(std::move(config)), config_(std::move(config)) {
     load();
 }
 
 YoloModel::~YoloModel() = default;
 
 bool YoloModel::load() {
-    const std::string& model_path = config_.path;
+    std::string model_path = config_.model.path;
+
+    if (!model_path.empty() && model_path[0] != '/') {
+        std::filesystem::path current_path = std::filesystem::current_path();
+        std::filesystem::path full_path = current_path / model_path;
+        model_path = full_path.string();
+    }
+
     std::filesystem::path path(model_path);
     if (!std::filesystem::exists(path)) {
         throw std::runtime_error("YOLO model file not found: " + model_path);
@@ -104,7 +111,7 @@ bool YoloModel::load() {
 #ifdef APP_HAS_ONNXRUNTIME
     if (impl_) {
         try {
-            impl_->session = std::make_unique<Ort::Session>(impl_->env, model_path_.c_str(), impl_->session_options);
+            impl_->session = std::make_unique<Ort::Session>(impl_->env, model_path.c_str(), impl_->session_options);
 
             Ort::AllocatorWithDefaultOptions allocator;
             std::size_t input_count = impl_->session->GetInputCount();
@@ -112,21 +119,11 @@ bool YoloModel::load() {
             impl_->input_name_ptrs.clear();
             impl_->input_names.reserve(input_count);
             impl_->input_name_ptrs.reserve(input_count);
-            for (std::size_t i = 0; i < input_count; ++i) {
-                char* name = impl_->session->GetInputName(i, allocator);
-                if (name) {
-                    impl_->input_names.emplace_back(name);
-                    allocator.Free(name);
-                } else {
-                    impl_->input_names.emplace_back(std::string("input") + std::to_string(i));
-                }
-            }
-            for (const auto& name : impl_->input_names) {
+            // 使用 GetInputNames 和 GetOutputNames
+            std::vector<std::string> input_names = impl_->session->GetInputNames();
+            for (const auto& name : input_names) {
+                impl_->input_names.push_back(name);
                 impl_->input_name_ptrs.push_back(name.c_str());
-            }
-            if (impl_->input_name_ptrs.empty()) {
-                impl_->input_names.emplace_back("input");
-                impl_->input_name_ptrs.push_back(impl_->input_names.back().c_str());
             }
 
             std::size_t output_count = impl_->session->GetOutputCount();
@@ -134,21 +131,11 @@ bool YoloModel::load() {
             impl_->output_name_ptrs.clear();
             impl_->output_names.reserve(output_count);
             impl_->output_name_ptrs.reserve(output_count);
-            for (std::size_t i = 0; i < output_count; ++i) {
-                char* name = impl_->session->GetOutputName(i, allocator);
-                if (name) {
-                    impl_->output_names.emplace_back(name);
-                    allocator.Free(name);
-                } else {
-                    impl_->output_names.emplace_back(std::string("output") + std::to_string(i));
-                }
-            }
-            for (const auto& name : impl_->output_names) {
+            // 使用 GetOutputNames
+            std::vector<std::string> output_names = impl_->session->GetOutputNames();
+            for (const auto& name : output_names) {
+                impl_->output_names.push_back(name);
                 impl_->output_name_ptrs.push_back(name.c_str());
-            }
-            if (impl_->output_name_ptrs.empty()) {
-                impl_->output_names.emplace_back("output");
-                impl_->output_name_ptrs.push_back(impl_->output_names.back().c_str());
             }
 
             if (input_count > 0) {
@@ -170,6 +157,7 @@ bool YoloModel::load() {
     }
 #endif
 
+    std::cout << "load model " << model_path << " success" << std::endl;
     loaded_ = true;
     return true;
 }
@@ -214,7 +202,10 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const {
                                                                 input_shape.data(),
                                                                 input_shape.size());
 
-            const Ort::Value* inputs[] = {&tensor};
+            // 使用 std::move 来避免复制
+            std::vector<Ort::Value> inputs;
+            inputs.push_back(std::move(tensor));  // 使用 std::move()
+
             std::size_t input_count = std::min<std::size_t>(impl_->input_name_ptrs.size(), static_cast<std::size_t>(1));
             if (input_count == 0) {
                 input_count = 1;
@@ -222,20 +213,21 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const {
             std::size_t output_count = std::max<std::size_t>(static_cast<std::size_t>(1), impl_->output_name_ptrs.size());
             auto outputs = impl_->session->Run(Ort::RunOptions{},
                                                impl_->input_name_ptrs.data(),
-                                               inputs,
-                                               input_count,
+                                               inputs.data(),  // 传递数据
+                                               inputs.size(),  // 输入数量
                                                impl_->output_name_ptrs.data(),
-                                               output_count);
+                                               impl_->output_name_ptrs.size());
 
             if (!outputs.empty() && outputs.front().IsTensor()) {
                 auto type_info = outputs.front().GetTensorTypeAndShapeInfo();
                 std::size_t output_elements = type_info.GetElementCount();
-                std::vector<int64_t> shape = type_info.GetShape();
-                const float* data = outputs.front().GetTensorData<float>();
+                const float* data = outputs.front().GetTensorData<float>();  // 显式指定类型
+
                 if (data && output_elements >= 6) {
                     std::size_t batch = 1;
                     std::size_t boxes = 0;
                     std::size_t attributes = 0;
+                    std::vector<int64_t> shape = type_info.GetShape();
                     if (shape.size() >= 3) {
                         batch = static_cast<std::size_t>(std::max<int64_t>(1, shape[0]));
                         boxes = static_cast<std::size_t>(std::max<int64_t>(1, shape[1]));
@@ -279,6 +271,7 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const {
                         if (confidence < 0.05) {
                             continue;
                         }
+
                         Region region;
                         region.x1 = static_cast<int>(std::round(x1));
                         region.y1 = static_cast<int>(std::round(y1));
@@ -290,7 +283,9 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const {
                         if (region.y2 < region.y1) {
                             std::swap(region.y1, region.y2);
                         }
-                        YoloDetection detection;
+
+                        // 修改：使用正确的 YoloDetection 类型
+                        Detection detection;
                         detection.region = region;
                         detection.label = std::string("class_") + std::to_string(best_class);
                         detection.confidence = std::min(0.999, std::max(0.0, confidence));
@@ -307,6 +302,8 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const {
 
     return detections;
 }
+
+
 
 }  // namespace app
 

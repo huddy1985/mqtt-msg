@@ -25,19 +25,19 @@ struct Detection {
 
 class Model {
 public:
-    explicit Model(ModelConfig config);
+    explicit Model(ScenarioDefinition config);
     virtual ~Model() = default;
 
     virtual bool load() = 0;
     virtual std::vector<Detection> infer(const CapturedFrame& frame) const = 0;
 
-    const ModelConfig &config() const { return config_; }
+    const ScenarioDefinition &config() const { return config_; }
 
 protected:
-    ModelConfig config_;
+    ScenarioDefinition config_;
 };
 
-std::unique_ptr<Model> create_model(const ModelConfig &config);
+std::unique_ptr<Model> create_model(const ScenarioDefinition &config);
 
 double random_confidence(const std::string &seed);
 std::array<int, 4> pseudo_box(const std::string &seed);

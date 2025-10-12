@@ -5,7 +5,7 @@
   "model": {
     "id": "yolo11_ash",
     "type": "yolo11",
-    "path": "models/yolo11_traffic.onnx"
+    "path": "models/smoke.onnx"
   },
   "mode": "continuous",
   "detection_regions": [
@@ -24,8 +24,6 @@
       400
     ]
   ],
-  "postprocessing": {
-    "confidence_threshold": 0.4,
-    "iou_threshold": 0.5
-  }
+  "confidence_threshold": 0.4,
+  "iou_threshold": 0.5
 }

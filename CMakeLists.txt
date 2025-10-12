@@ -16,6 +16,7 @@ add_executable(mqtt_msg
     src/mqtt.cpp
     src/model.cpp
     src/scenario.cpp
+	src/common.cpp
 )
 
 target_include_directories(mqtt_msg PRIVATE include)

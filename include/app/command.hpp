@@ -4,19 +4,10 @@
 #include <vector>
 
 #include "app/json.hpp"
+#include "app/config.hpp"
+#include "app/common.hpp"
 
 namespace app {
-
-struct Region {
-    int x1 = 0;
-    int y1 = 0;
-    int x2 = 0;
-    int y2 = 0;
-
-    bool operator==(const Region& other) const {
-        return x1 == other.x1 && y1 == other.y1 && x2 == other.x2 && y2 == other.y2;
-    }
-};
 
 struct Command {
     std::vector<std::string> scenario_ids;
@@ -24,6 +15,7 @@ struct Command {
     std::vector<Region> filter_regions;
     double threshold = 0.5;
     double fps = 1.0;
+    ModelInfo model_info;
     std::string activation_code;
     simplejson::JsonValue extra;
 };

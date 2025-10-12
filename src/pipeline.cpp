@@ -274,17 +274,25 @@ void ProcessingPipeline::add_missing(const std::vector<std::string> &scenario_id
             std::cerr << "No configuration store available to load scenario " << id << "\n";
             continue;
         }
-        auto path_it = config_.scenario_files.find(id);
-        if (path_it == config_.scenario_files.end()) {
+
+        auto path_it = config_.scenarios.begin();
+
+        for (; path_it != config_.scenarios.end(); path_it++) {
+            if (path_it->id == id) {
+                break;
+            }
+        }
+        
+        if (path_it == config_.scenarios.end()) {
             std::cerr << "Scenario " << id << " not found in configuration map\n";
             continue;
         }
         try {
-            ScenarioDefinition def = store_->load_scenario_file(path_it->second);
+            ScenarioDefinition def = store_->load_scenario_file(path_it->config_path);
             if (def.id.empty()) {
                 def.id = id;
             }
-            auto scenario = std::make_unique<Scenario>(def, path_it->second);
+            auto scenario = std::make_unique<Scenario>(def, path_it->config_path);
             if (!scenario->load_models()) {
                 std::cerr << "Failed to load models for scenario " << id << "\n";
                 continue;
@@ -316,6 +324,11 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
             continue;
         }
 
+        auto active_scenario = active_scenarios_.find(scenarioId);
+        if (active_scenario == active_scenarios_.end()) {
+            continue;
+        }
+
         AnalysisResult result;
         result.scenario_id = scenarioConfig->id;
         result.model = scenarioConfig->model;
@@ -335,7 +348,7 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
         std::unique_ptr<CnnModel> cnnModel;
         std::unique_ptr<YoloModel> yoloModel;
 
-        ModelConfig _config;
+        ScenarioDefinition _config;
         if (useCnn) {
             try {
                 cnnModel = std::make_unique<CnnModel>(_config);

@@ -12,14 +12,14 @@ namespace app {
 
 class YoloModel : public Model {
 public:
-    YoloModel(const ModelConfig& config);
+    YoloModel(const ScenarioDefinition& config);
     explicit YoloModel(const std::string& model_path);
     ~YoloModel();
 
     bool load();
 
     bool isLoaded() const noexcept { return loaded_; }
-    const std::string& path() const noexcept { return config_.path; }
+    const std::string& path() const noexcept { return config_.model.path; }
 
     std::vector<Detection> infer(const CapturedFrame& frame) const;
 
@@ -27,7 +27,7 @@ private:
     struct Impl;
 
     bool loaded_ = false;
-    ModelConfig config_;
+    ScenarioDefinition config_;
     std::unique_ptr<Impl> impl_;
 };
 
