@@ -21,6 +21,8 @@ public:
     bool load_models();
     bool release_models();
     
+    std::string model_type();
+    
     std::vector<Detection> analyze(const CapturedFrame& frame);
 
 private:

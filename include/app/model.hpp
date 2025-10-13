@@ -30,6 +30,8 @@ public:
 
     virtual bool load() = 0;
     virtual bool release() = 0;
+    
+    virtual std::string model_type() = 0;
     virtual std::vector<Detection> infer(const CapturedFrame& frame) const = 0;
 
     const ScenarioDefinition &config() const { return config_; }

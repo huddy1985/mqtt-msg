@@ -301,15 +301,19 @@ void ProcessingPipeline::add_missing(const std::string &scenario_id) {
 }
 
 std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) {
-    if (command.scenario_id.empty()) {
-        throw std::runtime_error("Command must define at least one scenario");
-    }
-
     std::vector<AnalysisResult> results;
     results.reserve(1);
     auto scenarioId = command.scenario_id;
+    AnalysisResult result;
     
     const ScenarioConfig* scenarioConfig = findScenario(scenarioId);
+
+    std::cout << "=== process image ===" << std::endl;
+
+    if (command.scenario_id.empty()) {
+        throw std::runtime_error("Command must define at least one scenario");
+    }
+    
     if (!scenarioConfig) {
         throw std::runtime_error("Unknown scenario: " + scenarioId);
     }
@@ -319,12 +323,14 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
         return results;
     }
 
-    auto active_scenario = active_scenarios_.find(scenarioId);
-    if (active_scenario == active_scenarios_.end()) {
+    auto scenario = active_scenarios_.find(scenarioId);
+    
+    if (scenario == active_scenarios_.end()) {
         return results;
     }
 
-    AnalysisResult result;
+    auto active_scenario = scenario->second;
+    
     result.scenario_id = scenarioConfig->id;
     result.model = scenarioConfig->model;
 
@@ -332,6 +338,7 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
     double interval = 1.0 / fps;
 
     std::vector<Region> regions = command.detection_regions;
+    
     if (regions.empty()) {
         regions.push_back(Region{0, 0, 0, 0});
     }
@@ -339,30 +346,6 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
     bool useCnn = (result.model.type == "cnn");
     bool useYolo = (!useCnn && result.model.type.rfind("yolo", 0) == 0);
     std::size_t frameCount = regions.size();
-
-    std::unique_ptr<CnnModel> cnnModel;
-    std::unique_ptr<YoloModel> yoloModel;
-
-    ScenarioDefinition _config;
-    if (useCnn) {
-        try {
-            cnnModel = std::make_unique<CnnModel>(_config);
-        } catch (const std::exception& ex) {
-            std::cerr << "CNN model load failed: " << ex.what() << "\n";
-        }
-        if (!frameCount) {
-            frameCount = 1;
-        }
-    } else if (useYolo) {
-        try {
-            yoloModel = std::make_unique<YoloModel>(_config);
-        } catch (const std::exception& ex) {
-            std::cerr << "YOLO model load failed: " << ex.what() << "\n";
-        }
-        if (!frameCount) {
-            frameCount = 1;
-        }
-    }
 
     std::vector<CapturedFrame> capturedFrames;
     try {
@@ -383,7 +366,7 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
             frame.timestamp = index * interval;
         }
 
-        if (useCnn && cnnModel && cnnModel->isLoaded()) {
+        if (active_scenario->model_type() == "cnn") {
             const CapturedFrame* frameData = (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
             CapturedFrame synthetic;
             if (!frameData) {
@@ -400,7 +383,7 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
                 frameData = &synthetic;
             }
 
-            auto predictions = cnnModel->infer(*frameData);
+            auto predictions = active_scenario->analyze(*frameData);
             if (predictions.empty()) {
                 predictions.push_back(Detection{"unknown"});
             }
@@ -415,7 +398,7 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
                 detection.confidence = predictions[detIndex].confidence;
                 frame.detections.push_back(std::move(detection));
             }
-        } else if (useYolo && yoloModel && yoloModel->isLoaded()) {
+        } else if (active_scenario->model_type() == "yolo") {
             const CapturedFrame* frameData = (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
             CapturedFrame synthetic;
             if (!frameData) {
@@ -432,7 +415,7 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
                 frameData = &synthetic;
             }
 
-            auto detections = yoloModel->infer(*frameData);
+            auto detections = active_scenario->analyze(*frameData);
             for (const auto& yoloDet : detections) {
                 Region region = yoloDet.region;
                 bool filtered = isFiltered(region, command.filter_regions);

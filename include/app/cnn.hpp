@@ -17,6 +17,7 @@ public:
 
     bool load();
     bool release();
+    std::string model_type();
 
     bool isLoaded() const noexcept { return loaded_; }
     const std::string& path() const noexcept { return config_.model.path; }
@@ -26,6 +27,7 @@ public:
 private:
     struct Impl;
 
+    std::string type;
     bool loaded_ = false;
     ScenarioDefinition config_;
     std::unique_ptr<Impl> impl_;

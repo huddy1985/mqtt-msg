@@ -49,7 +49,9 @@ std::uint64_t fingerprint(const std::vector<std::uint8_t>& data) {
 
 }  // namespace
 
-CnnModel::CnnModel(const ScenarioDefinition& config): Model(std::move(config)), config_(std::move(config)) {
+CnnModel::CnnModel(const ScenarioDefinition& config): Model(std::move(config)), 
+                                                        config_(std::move(config)),
+                                                        type("cnn") {
     load();
 }
 
@@ -135,6 +137,10 @@ bool CnnModel::release() {
     return loaded_;
 }
 
+std::string CnnModel::model_type()
+{
+    return type;
+}
 
 std::vector<Detection> CnnModel::infer(const CapturedFrame& frame) const {
     std::vector<Detection> predictions;

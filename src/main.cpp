@@ -574,12 +574,15 @@ int main(int argc, char* argv[]) {
                     std::uint64_t version = 0;
                     {
                         std::unique_lock<std::mutex> lock(session_mutex);
+
                         session_cv.wait(lock, [&]() {
                             return monitor_stop.load() || active_session != nullptr;
                         });
+
                         if (monitor_stop.load()) {
                             break;
                         }
+
                         session = active_session;
                         version = session_version.load();
                     }
@@ -593,12 +596,10 @@ int main(int argc, char* argv[]) {
                             if (monitor_stop.load() || session_version.load() != version) {
                                 break;
                             }
-                            
+
                             if (command.scenario_id.empty()) {
                                 continue;
                             }
-
-                            continue;
 
                             std::vector<app::AnalysisResult> analyses;
 
@@ -654,13 +655,15 @@ int main(int argc, char* argv[]) {
                                     frameObj["detections"] = detectionArray;
 
                                     simplejson::JsonValue event = simplejson::makeObject();
+                                    simplejson::JsonValue modelJson = simplejson::makeObject();
+                                    
                                     auto& eventObj = event.asObject();
                                     eventObj["type"] = "analysis_anomaly";
                                     eventObj["timestamp"] = currentIsoTimestamp();
                                     eventObj["service_name"] = effectiveConfig.service.name;
                                     eventObj["client_id"] = effectiveConfig.mqtt.client_id;
                                     eventObj["scenario_id"] = analysis.scenario_id;
-                                    simplejson::JsonValue modelJson = simplejson::makeObject();
+                                    
                                     auto& modelObj = modelJson.asObject();
                                     modelObj["id"] = analysis.model.id;
                                     modelObj["type"] = analysis.model.type;
@@ -671,6 +674,7 @@ int main(int argc, char* argv[]) {
                                     if (!session->request_id.empty()) {
                                         eventObj["request_id"] = session->request_id;
                                     }
+
                                     if (command.fps > 0.0) {
                                         eventObj["fps"] = command.fps;
                                     }

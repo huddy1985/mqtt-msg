@@ -49,7 +49,7 @@ private:
     AppConfig config_;
     RtspFrameGrabber frame_grabber_;
     ConfigStore *store_{nullptr};
-    std::map<std::string, std::unique_ptr<Scenario>> active_scenarios_;
+    std::map<std::string, std::shared_ptr<Scenario>> active_scenarios_;
 };
 
 }  // namespace app

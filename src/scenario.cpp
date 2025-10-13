@@ -20,7 +20,8 @@ bool Scenario::load_models() {
     return true;
 }
 
-bool Scenario::release_models() {
+bool Scenario::release_models() 
+{
     if (!model_) {
         std::cerr << "Model is not loaded " << definition_.id << "\n";
         return false;
@@ -30,6 +31,11 @@ bool Scenario::release_models() {
         return false;
     }
     return true;
+}
+
+std::string Scenario::model_type()
+{
+    return model_->model_type();
 }
 
 std::vector<Detection> Scenario::analyze(const CapturedFrame &frame) {
