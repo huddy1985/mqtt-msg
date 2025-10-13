@@ -27,4 +27,7 @@ struct ModelInfo {
 Region parseRegion(const simplejson::JsonValue& value);
 std::vector<Region> parseRegions(const simplejson::JsonValue& value);
 
+std::string detectLocalIp();
+std::string detectLocalMac();
+
 } // namespace app

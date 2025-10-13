@@ -21,17 +21,12 @@
 #include <vector>
 #include <arpa/inet.h>
 #include <filesystem>
-#include <ifaddrs.h>
-#include <net/if.h>
-#include <netinet/in.h>
-#include <sys/ioctl.h>
-#include <arpa/inet.h>
-#include <unistd.h> 
 
 #include "app/command.hpp"
 #include "app/config.hpp"
 #include "app/mqtt.hpp"
 #include "app/pipeline.hpp"
+#include "app/common.hpp"
 
 namespace {
 
@@ -64,76 +59,6 @@ void printUsage(const char* executable) {
 
 void signalHandler(int signal) {
     gSignalStatus = signal;
-}
-
-std::string detectLocalIp() {
-    std::string fallback = "0.0.0.0";
-    struct ifaddrs* ifaddr = nullptr;
-    if (getifaddrs(&ifaddr) != 0 || !ifaddr) {
-        return fallback;
-    }
-    std::string result = fallback;
-    for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
-        if (!ifa->ifa_addr) {
-            continue;
-        }
-        if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK) != 0) {
-            continue;
-        }
-        if (ifa->ifa_addr->sa_family == AF_INET) {
-            auto* addr = reinterpret_cast<sockaddr_in*>(ifa->ifa_addr);
-            char buffer[INET_ADDRSTRLEN] = {0};
-            if (inet_ntop(AF_INET, &addr->sin_addr, buffer, sizeof(buffer))) {
-                result = buffer;
-                break;
-            }
-        }
-    }
-    freeifaddrs(ifaddr);
-    return result;
-}
-
-std::string detectLocalMac() {
-    std::string fallback = "00:00:00:00:00:00";
-    struct ifaddrs* ifaddr = nullptr;
-    if (getifaddrs(&ifaddr) != 0 || !ifaddr) {
-        return fallback;
-    }
-
-    std::string mac = fallback;
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0) {
-        freeifaddrs(ifaddr);
-        return fallback;
-    }
-
-    for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
-        if (!ifa->ifa_addr)
-            continue;
-
-        if ((ifa->ifa_flags & IFF_UP) == 0 || (ifa->ifa_flags & IFF_LOOPBACK))
-            continue;
-
-        if (ifa->ifa_addr->sa_family == AF_INET) {
-            struct ifreq ifr {};
-            std::strncpy(ifr.ifr_name, ifa->ifa_name, IFNAMSIZ - 1);
-            if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {
-                unsigned char* hw = reinterpret_cast<unsigned char*>(ifr.ifr_hwaddr.sa_data);
-                std::ostringstream oss;
-                oss << std::hex << std::setfill('0');
-                for (int i = 0; i < 6; ++i) {
-                    oss << std::setw(2) << static_cast<int>(hw[i]);
-                    if (i < 5) oss << ":";
-                }
-                mac = oss.str();
-                break;
-            }
-        }
-    }
-
-    close(sock);
-    freeifaddrs(ifaddr);
-    return mac;
 }
 
 simplejson::JsonValue buildServiceSnapshot(const app::AppConfig& config, const std::string& localIp) {
@@ -286,6 +211,7 @@ int main(int argc, char* argv[]) {
 
         bool runService = forceService || (!forceOneshot && commandPath.empty());
 
+        // ======================= 注册为服务执行 ===================
         if (!runService) {
             std::string commandData;
             if (!commandPath.empty()) {
@@ -300,7 +226,7 @@ int main(int argc, char* argv[]) {
             }
 
             if (trim(commandData).empty()) {
-                simplejson::JsonValue info = buildServiceSnapshot(effectiveConfig, detectLocalIp());
+                simplejson::JsonValue info = buildServiceSnapshot(effectiveConfig, app::detectLocalIp());
                 std::cout << info.dump(prettyPrint ? 2 : -1) << std::endl;
                 return 0;
             }
@@ -384,12 +310,10 @@ int main(int argc, char* argv[]) {
             return 0;
         }
 
-        std::string localIp = detectLocalIp();
+        std::string localIp = app::detectLocalIp();
         auto statusBuilder = [effectiveConfig, localIp]() mutable {
             return buildServiceSnapshot(effectiveConfig, localIp);
         };
-
-        std::string localMac = detectLocalMac();
 
         std::mutex session_mutex;
         std::condition_variable session_cv;
@@ -397,6 +321,7 @@ int main(int argc, char* argv[]) {
         std::atomic<std::uint64_t> session_version{0};
         std::atomic<bool> monitor_stop{false};
 
+        // ======================= MQTT 命令下发回调 =================
         auto processor = [&pipeline,
                           &effectiveConfig,
                           &session_mutex,
@@ -567,6 +492,7 @@ int main(int argc, char* argv[]) {
 
         app::MqttService service(effectiveConfig, processor, statusBuilder);
 
+        // ======================= 扫描任务 ==========================
         std::thread monitorThread([&]() {
             try {
                 while (!monitor_stop.load()) {
@@ -656,7 +582,7 @@ int main(int argc, char* argv[]) {
 
                                     simplejson::JsonValue event = simplejson::makeObject();
                                     simplejson::JsonValue modelJson = simplejson::makeObject();
-                                    
+
                                     auto& eventObj = event.asObject();
                                     eventObj["type"] = "analysis_anomaly";
                                     eventObj["timestamp"] = currentIsoTimestamp();
@@ -668,9 +594,11 @@ int main(int argc, char* argv[]) {
                                     modelObj["id"] = analysis.model.id;
                                     modelObj["type"] = analysis.model.type;
                                     modelObj["path"] = analysis.model.path;
+
                                     eventObj["model"] = modelJson;
                                     eventObj["frame"] = frameJson;
                                     eventObj["threshold"] = command.threshold;
+
                                     if (!session->request_id.empty()) {
                                         eventObj["request_id"] = session->request_id;
                                     }
@@ -724,6 +652,7 @@ int main(int argc, char* argv[]) {
 
         monitor_stop.store(true);
         session_cv.notify_all();
+
         if (monitorThread.joinable()) {
             monitorThread.join();
         }

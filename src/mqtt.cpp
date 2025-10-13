@@ -1,4 +1,5 @@
 #include "app/mqtt.hpp"
+#include "app/common.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -9,22 +10,19 @@
 #include <thread>
 #include <utility>
 
-#ifdef APP_HAS_MOSQUITTO
 #include <mosquitto.h>
-#endif
 
 namespace app {
 
 namespace {
-#ifdef APP_HAS_MOSQUITTO
+
 std::string toCompactJson(const simplejson::JsonValue& value) {
     return value.dump(-1);
 }
-#endif
+
 }  // namespace
 
 struct MqttService::Impl {
-#ifdef APP_HAS_MOSQUITTO
     Impl(AppConfig cfg, Processor proc, StatusBuilder status)
         : config(std::move(cfg)), processor(std::move(proc)), status_builder(std::move(status)) {
         if (!processor) {
@@ -35,6 +33,7 @@ struct MqttService::Impl {
         if (!config.mqtt.client_id.empty()) {
             client_id = config.mqtt.client_id.c_str();
         }
+
         client.reset(mosquitto_new(client_id, true, this));
         if (!client) {
             mosquitto_lib_cleanup();
@@ -75,6 +74,8 @@ struct MqttService::Impl {
     }
 
     void run() {
+        std::cout << "=========== mqtt run ===============" << std::endl;
+        
         stop_requested.store(false);
         const std::string& server = config.mqtt.server;
         if (server.empty()) {
@@ -83,9 +84,43 @@ struct MqttService::Impl {
         int port = config.mqtt.port > 0 ? config.mqtt.port : 1883;
         int keep_alive = 60;
         int rc = mosquitto_connect(client.get(), server.c_str(), port, keep_alive);
+
         if (rc != MOSQ_ERR_SUCCESS) {
             throw std::runtime_error(std::string("Failed to connect to MQTT broker: ") + mosquitto_strerror(rc));
         }
+
+        // 从配置中读取 topic，如 local.config.json -> mqtt.heartbeat_topic
+        std::string topic = config.mqtt.heartbeat_topic.empty()
+                            ? "edge/heartbeat"
+                            : config.mqtt.heartbeat_topic;
+
+        int hearttime = config.mqtt.heartbeat_time == 0 ? 10 : config.mqtt.heartbeat_time;
+        std::cout << "hearttime: " << hearttime << std::endl;
+        
+        heartbeat_thread = std::thread([this, topic, hearttime]() {
+            while (!stop_requested.load()) {
+                try {
+                    simplejson::JsonValue heartbeat = simplejson::makeObject();
+                    auto& obj = heartbeat.asObject();
+
+                    auto ts = std::chrono::duration_cast<std::chrono::seconds>(
+                                std::chrono::system_clock::now().time_since_epoch()
+                            ).count();
+
+                    obj["timestamp"] = std::to_string(ts);
+
+                    obj["macAddress"] = detectLocalMac();
+
+                    publishJson(heartbeat, topic);
+
+                } catch (const std::exception& ex) {
+                    std::cerr << "[MQTT] Heartbeat send failed: " << ex.what() << std::endl;
+                }
+
+                for (int i = 0; i < hearttime && !stop_requested.load(); ++i)
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+        });
 
         while (!stop_requested.load()) {
             rc = mosquitto_loop(client.get(), 1000, 1);
@@ -98,6 +133,7 @@ struct MqttService::Impl {
                 mosquitto_reconnect(client.get());
             }
         }
+
     }
 
     void stop() {
@@ -107,6 +143,10 @@ struct MqttService::Impl {
         } else {
             stop_requested.store(true);
             mosquitto_disconnect(client.get());
+        }
+
+        if (heartbeat_thread.joinable()) {
+            heartbeat_thread.join();
         }
     }
 
@@ -246,13 +286,7 @@ struct MqttService::Impl {
     std::atomic<bool> stop_requested{false};
     std::mutex publish_mutex;
     std::string publish_topic;
-#else
-    Impl(AppConfig, Processor, StatusBuilder) {
-        throw std::runtime_error("MQTT support not available: libmosquitto not linked");
-    }
-    void run() {}
-    void stop() {}
-#endif
+    std::thread heartbeat_thread;
 };
 
 MqttService::MqttService(AppConfig config, Processor processor, StatusBuilder status_builder)
@@ -261,29 +295,15 @@ MqttService::MqttService(AppConfig config, Processor processor, StatusBuilder st
 MqttService::~MqttService() = default;
 
 void MqttService::run() {
-#ifdef APP_HAS_MOSQUITTO
     impl_->run();
-#else
-    throw std::runtime_error("MQTT support not available: libmosquitto not linked");
-#endif
 }
 
 void MqttService::stop() {
-#ifdef APP_HAS_MOSQUITTO
     impl_->stop();
-#else
-    (void)impl_;
-#endif
 }
 
 void MqttService::publish(simplejson::JsonValue value, const std::string& topic) {
-#ifdef APP_HAS_MOSQUITTO
     impl_->publishJson(std::move(value), topic);
-#else
-    (void)value;
-    (void)topic;
-    throw std::runtime_error("MQTT support not available: libmosquitto not linked");
-#endif
 }
 
 }  // namespace app

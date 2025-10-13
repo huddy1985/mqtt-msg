@@ -87,6 +87,8 @@ AppConfig loadConfig(const std::string& path) {
     config.mqtt.publish_topic = mqtt.getString("publish_topic");
     config.mqtt.username = mqtt.getString("username");
     config.mqtt.password = mqtt.getString("password");
+    config.mqtt.heartbeat_time = mqtt.getNumber("hearttime");
+    config.mqtt.heartbeat_topic = mqtt.getString("hearttime_topic");
   
     if (!root.contains("rtsp")) {
         throw std::runtime_error("Configuration missing 'rtsp' section");
@@ -134,24 +136,39 @@ MqttConfig parse_mqtt_config(const simplejson::JsonValue &node) {
     if (node.contains("server")) {
         config.server = node["server"].asString();
     }
+
     if (node.contains("port")) {
         config.port = static_cast<int>(node["port"].asNumber());
     }
+
     if (node.contains("client_id")) {
         config.client_id = node["client_id"].asString();
     }
+
     if (node.contains("username")) {
         config.username = node["username"].asString();
     }
+
     if (node.contains("password")) {
         config.password = node["password"].asString();
     }
+
     if (node.contains("subscribe_topic")) {
         config.subscribe_topic = node["subscribe_topic"].asString();
     }
+
+    if (node.contains("heartbeat_topic")) {
+        config.heartbeat_topic = node["heartbeat_topic"].asString();
+    }
+
+    if (node.contains("heartbeat_time")) {
+        config.heartbeat_time = node["heartbeat_time"].asNumber();
+    }
+
     if (node.contains("publish_topic")) {
         config.publish_topic = node["publish_topic"].asString();
     }
+
     return config;
 }
 

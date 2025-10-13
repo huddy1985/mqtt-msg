@@ -29,11 +29,15 @@ struct RtspConfig {
 struct MqttConfig {
     std::string server;
     int port = 0;
+
     std::string client_id;
     std::string subscribe_topic;
+    std::string heartbeat_topic;
     std::string publish_topic;
     std::string username;
     std::string password;
+
+    int heartbeat_time;
 };
 
 struct ServiceInfo {
