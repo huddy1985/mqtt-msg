@@ -62,6 +62,7 @@ struct ScenarioDefinition {
 
     double threshold{0.5};
     ModelConfig model;
+    std::vector<std::string> labels;
 };
 
 struct AppConfig {

@@ -210,21 +210,19 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
     if (impl_ && impl_->session) {
         try {
             // ============ 1. 构造输入张量 ============
-            std::vector<int64_t> input_shape = impl_->input_shape;
-            if (input_shape.empty()) input_shape = {1, 3, 640, 640};
-
-            std::size_t element_count = 1;
-            for (auto dim : input_shape) element_count *= static_cast<std::size_t>(dim);
-
-            std::vector<float> input_tensor(element_count, 0.0f);
-            for (std::size_t i = 0; i < element_count; ++i) {
-                std::uint8_t value = frame.data[i % frame.data.size()];
-                input_tensor[i] = static_cast<float>(value) / 255.0f;
+            cv::Mat image = cv::imdecode(frame.data, cv::IMREAD_COLOR);  // 这里使用 IMREAD_COLOR 读取彩色图像
+            if (image.empty()) {
+                std::cerr << "Failed to decode image" << std::endl;
+                return detections;
             }
 
-            Ort::MemoryInfo mem_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+            auto prep = preprocess_letterbox(image, INPUT_WIDTH, INPUT_HEIGHT);
+
+            std::array<int64_t, 4> input_shape{1, 3, INPUT_HEIGHT, INPUT_WIDTH};
+
+            Ort::MemoryInfo mem_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeCPU);
             Ort::Value input_tensor_val = Ort::Value::CreateTensor<float>(
-                mem_info, input_tensor.data(), input_tensor.size(),
+                mem_info, prep.input_tensor.data(), prep.input_tensor.size(),
                 input_shape.data(), input_shape.size());
             
             std::cout << std::string(impl_->input_name_ptrs[0]) << " " << std::string(impl_->output_name_ptrs[0]) << std::endl;
@@ -239,38 +237,6 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
 
             std::cout << "\n=========== [ONNX DEBUG] Session->Run() Output Info ===========" << std::endl;
             std::cout << "Output tensor count: " << outputs.size() << std::endl;
-
-            for (std::size_t idx = 0; idx < outputs.size(); ++idx) {
-                const auto& out = outputs[idx];
-                Ort::TensorTypeAndShapeInfo info = out.GetTensorTypeAndShapeInfo();
-                ONNXTensorElementDataType type = info.GetElementType();
-                std::vector<int64_t> shape = info.GetShape();
-
-                // 打印输出编号、数据类型、形状
-                std::cout << "  [" << idx << "] Tensor:"
-                        << "\n    DataType: " << type
-                        << "\n    Shape: [";
-                for (std::size_t i = 0; i < shape.size(); ++i) {
-                    std::cout << shape[i];
-                    if (i + 1 < shape.size()) std::cout << ", ";
-                }
-                std::cout << "]" << std::endl;
-
-                // 如果是张量且类型是 float，可打印前若干元素调试
-                if (out.IsTensor() && type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
-                    const float* data = out.GetTensorData<float>();
-                    size_t num_elems = info.GetElementCount();
-                    size_t print_count = std::min<size_t>(num_elems, 20);
-                    std::cout << "    First " << print_count << " elements: [";
-                    for (size_t j = 0; j < print_count; ++j) {
-                        std::cout << data[j];
-                        if (j + 1 < print_count) std::cout << ", ";
-                    }
-                    if (num_elems > print_count)
-                        std::cout << " ... (" << num_elems - print_count << " more)";
-                    std::cout << "]" << std::endl;
-                }
-            }
             
             if (outputs.empty() || !outputs.front().IsTensor()) {
                 std::cerr << "[YoloModel] Invalid ONNX output.\n";
@@ -289,9 +255,6 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
 
             int num_attrs = static_cast<int>(shape[1]);
             int num_boxes = static_cast<int>(shape[2]);
-            
-            std::cout << "num_boxes: " << num_boxes << std::endl;
-            std::cout << "==============================================================\n" << std::endl;
 
             for (int i = 0; i < num_boxes; ++i) {
                 float x1 = data[0 * num_boxes + i];
@@ -301,20 +264,32 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
                 float conf = data[4 * num_boxes + i];
                 float cls  = data[5 * num_boxes + i];
 
-                if (conf < 0.01f)
+                if (conf < config_.threshold)
                     continue;
 
-                std::cout << "[YoloModel] Detections parsed: " << conf << std::endl;
-
                 Detection det;
-                det.region.x1 = static_cast<int>(x1);
-                det.region.y1 = static_cast<int>(y1);
-                det.region.x2 = static_cast<int>(x2);
-                det.region.y2 = static_cast<int>(y2);
-                det.label = "class_" + std::to_string(static_cast<int>(cls));
+                det.region.x1 = (static_cast<int>(x1) - prep.pad_x)/prep.scale;
+                det.region.y1 = (static_cast<int>(y1) - prep.pad_y)/prep.scale;
+                det.region.x2 = (static_cast<int>(x2) - prep.pad_x)/prep.scale;
+                det.region.y2 = (static_cast<int>(y2) - prep.pad_y)/prep.scale;
+
+                std::vector<std::string> labels = config_.labels;
+                int cls_idx = static_cast<int>(cls);
+                if ( cls_idx < labels.size()) {
+                    det.label = "class_" + labels[cls_idx];
+                } else {
+                    det.label = "class_" + std::to_string(static_cast<int>(cls));
+                }
+
                 det.confidence = conf;
                 detections.push_back(det);
+
+                std::cout << "[YoloModel] Detections parsed: " << conf << 
+                    " threshold: " << config_.threshold << 
+                    " label: " << det.label << std::endl;
             }
+
+            std::cout << "==============================================================\n" << std::endl;
 
         } catch (const Ort::Exception& ex) {
             std::cerr << "[YoloModel] Inference failed: " << ex.what() << std::endl;

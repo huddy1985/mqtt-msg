@@ -46,6 +46,7 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
     }
     command << "-i '" << buildRtspUrl() << "' ";
     command << "-vf fps=" << fps << ' ';
+    command << "-s 1920x1080 ";
     command << "-vframes " << max_frames << ' ';
     command << "-vcodec mjpeg -f image2pipe - 2>/dev/null";
 
@@ -65,7 +66,7 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
     frames.reserve(max_frames);
 
     std::vector<std::uint8_t> frameBuffer;
-    frameBuffer.reserve(32 * 1024);
+    frameBuffer.reserve(1024 * 1024);
 
     std::array<std::uint8_t, 4096> buffer{};
     std::uint8_t previous = 0;

@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <opencv2/opencv.hpp>
 
 #include "app/json.hpp"
 
@@ -27,7 +28,29 @@ struct ModelInfo {
 Region parseRegion(const simplejson::JsonValue& value);
 std::vector<Region> parseRegions(const simplejson::JsonValue& value);
 
+std::vector<std::string> parseLabels(const simplejson::JsonValue& value);
+
 std::string detectLocalIp();
 std::string detectLocalMac();
+
+using namespace cv; 
+
+constexpr int INPUT_WIDTH = 640;
+constexpr int INPUT_HEIGHT = 640;
+
+struct PreprocessInfo {
+    std::vector<float> input_tensor;
+    float scale;
+    int pad_x;
+    int pad_y;
+    cv::Mat resized_image;
+};
+
+struct InferResult {
+    int num_boxes;
+    int classid;
+};
+
+PreprocessInfo preprocess_letterbox(const cv::Mat& img, int input_w, int input_h);
 
 } // namespace app

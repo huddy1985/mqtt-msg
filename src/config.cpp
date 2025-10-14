@@ -348,6 +348,10 @@ ScenarioDefinition parse_scenario_definition(const simplejson::JsonValue &root) 
         def.threshold = root["confidence_threshold"].asNumber();
     }
 
+    if (root.contains("labels")) {
+        def.labels = parseLabels(root["labels"]);
+    }
+
     return def;
 }
 

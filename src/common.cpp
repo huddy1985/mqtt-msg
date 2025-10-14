@@ -38,6 +38,18 @@ std::vector<Region> parseRegions(const simplejson::JsonValue& value)
     return regions;
 }
 
+std::vector<std::string> parseLabels(const simplejson::JsonValue& value)
+{
+    std::vector<std::string> labels;
+    if (!value.isArray()) {
+        return labels;
+    }
+    for (const auto& entry : value.asArray()) {
+        labels.push_back(entry.asString());
+    }
+    return labels;
+}
+
 std::string detectLocalIp() 
 {
     std::string fallback = "0.0.0.0";
@@ -108,6 +120,38 @@ std::string detectLocalMac()
     close(sock);
     freeifaddrs(ifaddr);
     return mac;
+}
+
+PreprocessInfo preprocess_letterbox(const cv::Mat& img, int input_w, int input_h) 
+{
+    int img_w = img.cols;
+    int img_h = img.rows;
+
+    float scale = std::min((float)input_w / img_w, (float)input_h / img_h);
+    int new_w = static_cast<int>(img_w * scale);
+    int new_h = static_cast<int>(img_h * scale);
+
+    cv::Mat resized;
+    cv::resize(img, resized, cv::Size(new_w, new_h));
+
+    int pad_x = (input_w - new_w) / 2;
+    int pad_y = (input_h - new_h) / 2;
+    cv::Mat letterbox(input_h, input_w, img.type(), cv::Scalar(114, 114, 114));
+    resized.copyTo(letterbox(cv::Rect(pad_x, pad_y, new_w, new_h)));
+
+    cv::Mat float_img;
+    letterbox.convertTo(float_img, CV_32F, 1.0 / 255.0);
+    std::vector<cv::Mat> chw(3);
+    cv::split(float_img, chw);
+
+    std::vector<float> input_tensor;
+    for (int c = 0; c < 3; ++c) {
+        input_tensor.insert(input_tensor.end(),
+                            (float*)chw[c].datastart,
+                            (float*)chw[c].dataend);
+    }   
+
+    return {input_tensor, scale, pad_x, pad_y, letterbox};
 }
 
 };
