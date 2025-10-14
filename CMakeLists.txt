@@ -68,6 +68,10 @@ endif()
 find_package(Threads REQUIRED)
 target_link_libraries(InspectAI PRIVATE Threads::Threads)
 
+find_package(OpenCV REQUIRED PATHS /usr/include/opencv4)
+include_directories(${OpenCV_INCLUDE_DIRS})
+target_link_libraries(InspectAI PRIVATE ${OpenCV_LIBS})
+
 if (MOSQUITTO_FOUND)
     target_compile_definitions(InspectAI PRIVATE APP_HAS_MOSQUITTO)
     target_include_directories(InspectAI PRIVATE ${MOSQUITTO_INCLUDE_DIRS})
