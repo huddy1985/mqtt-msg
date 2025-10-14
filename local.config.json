@@ -13,7 +13,9 @@
   "rtsp": {
     "host": "127.0.0.1",
     "path": "/live.stream",
-    "port": 8554
+    "port": 8554,
+    "width": 1920,
+    "height": 1080
   },
   "scenarios": [
     {
