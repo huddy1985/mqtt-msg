@@ -157,7 +157,7 @@ struct MqttService::Impl {
             topic = config.mqtt.publish_topic;
         }
         if (topic.empty()) {
-            topic = "mqtt_msg/response";
+            topic = "InspectAI/response";
         }
         std::string payload = toCompactJson(value);
         int rc = mosquitto_publish(client.get(), nullptr, topic.c_str(), static_cast<int>(payload.size()), payload.data(), 1, false);

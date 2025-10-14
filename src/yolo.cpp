@@ -19,8 +19,7 @@
 namespace app {
 
 struct YoloModel::Impl {
-#ifdef APP_HAS_ONNXRUNTIME
-    Impl() : env(ORT_LOGGING_LEVEL_WARNING, "mqtt_msg") {
+    Impl() : env(ORT_LOGGING_LEVEL_WARNING, "InspectAI") {
         session_options.SetIntraOpNumThreads(1);
         session_options.SetGraphOptimizationLevel(ORT_ENABLE_EXTENDED);
     }
@@ -33,7 +32,6 @@ struct YoloModel::Impl {
     std::vector<std::string> output_names;
     std::vector<const char*> output_name_ptrs;
     std::vector<int64_t> input_shape{1, 3, 640, 640};
-#endif
 };
 
 namespace {
@@ -112,11 +110,10 @@ bool YoloModel::load()
 
     impl_ = std::make_unique<Impl>();
 
-#ifdef APP_HAS_ONNXRUNTIME
     if (impl_) {
         try {
             impl_->session = std::make_unique<Ort::Session>(impl_->env, model_path.c_str(), impl_->session_options);
-
+            
             Ort::AllocatorWithDefaultOptions allocator;
             std::size_t input_count = impl_->session->GetInputCount();
             impl_->input_names.clear();
@@ -127,7 +124,7 @@ bool YoloModel::load()
             std::vector<std::string> input_names = impl_->session->GetInputNames();
             for (const auto& name : input_names) {
                 impl_->input_names.push_back(name);
-                impl_->input_name_ptrs.push_back(name.c_str());
+                impl_->input_name_ptrs.push_back(impl_->input_names.back().c_str());
             }
 
             std::size_t output_count = impl_->session->GetOutputCount();
@@ -139,8 +136,13 @@ bool YoloModel::load()
             std::vector<std::string> output_names = impl_->session->GetOutputNames();
             for (const auto& name : output_names) {
                 impl_->output_names.push_back(name);
-                impl_->output_name_ptrs.push_back(name.c_str());
+                impl_->output_name_ptrs.push_back(impl_->output_names.back().c_str());
             }
+
+            for (const auto& name : impl_->input_names)
+                std::cout << "[DEBUG] Input name: " << name << std::endl;
+            for (const auto& name : impl_->output_names)
+                std::cout << "[DEBUG] Output name: " << name << std::endl;
 
             if (input_count > 0) {
                 Ort::TypeInfo type_info = impl_->session->GetInputTypeInfo(0);
@@ -159,7 +161,6 @@ bool YoloModel::load()
             impl_->output_name_ptrs.clear();
         }
     }
-#endif
 
     std::cout << "load model " << model_path << " success" << std::endl;
     loaded_ = true;
@@ -190,8 +191,10 @@ std::string YoloModel::model_type()
 }
 
 
-std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const {
+std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
+{
     std::vector<Detection> detections;
+
     if (!loaded_) {
         std::cerr << "[YoloModel] Warning: model not loaded.\n";
         return detections;
@@ -204,7 +207,6 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const {
 
     std::cout << "[YoloModel] Analyzing frame at timestamp " << frame.timestamp << std::endl;
 
-#ifdef APP_HAS_ONNXRUNTIME
     if (impl_ && impl_->session) {
         try {
             // ============ 1. 构造输入张量 ============
@@ -224,6 +226,8 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const {
             Ort::Value input_tensor_val = Ort::Value::CreateTensor<float>(
                 mem_info, input_tensor.data(), input_tensor.size(),
                 input_shape.data(), input_shape.size());
+            
+            std::cout << std::string(impl_->input_name_ptrs[0]) << " " << std::string(impl_->output_name_ptrs[0]) << std::endl;
 
             // ============ 2. 推理 ============
             auto outputs = impl_->session->Run(Ort::RunOptions{},
@@ -233,6 +237,41 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const {
                                                impl_->output_name_ptrs.data(),
                                                impl_->output_name_ptrs.size());
 
+            std::cout << "\n=========== [ONNX DEBUG] Session->Run() Output Info ===========" << std::endl;
+            std::cout << "Output tensor count: " << outputs.size() << std::endl;
+
+            for (std::size_t idx = 0; idx < outputs.size(); ++idx) {
+                const auto& out = outputs[idx];
+                Ort::TensorTypeAndShapeInfo info = out.GetTensorTypeAndShapeInfo();
+                ONNXTensorElementDataType type = info.GetElementType();
+                std::vector<int64_t> shape = info.GetShape();
+
+                // 打印输出编号、数据类型、形状
+                std::cout << "  [" << idx << "] Tensor:"
+                        << "\n    DataType: " << type
+                        << "\n    Shape: [";
+                for (std::size_t i = 0; i < shape.size(); ++i) {
+                    std::cout << shape[i];
+                    if (i + 1 < shape.size()) std::cout << ", ";
+                }
+                std::cout << "]" << std::endl;
+
+                // 如果是张量且类型是 float，可打印前若干元素调试
+                if (out.IsTensor() && type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
+                    const float* data = out.GetTensorData<float>();
+                    size_t num_elems = info.GetElementCount();
+                    size_t print_count = std::min<size_t>(num_elems, 20);
+                    std::cout << "    First " << print_count << " elements: [";
+                    for (size_t j = 0; j < print_count; ++j) {
+                        std::cout << data[j];
+                        if (j + 1 < print_count) std::cout << ", ";
+                    }
+                    if (num_elems > print_count)
+                        std::cout << " ... (" << num_elems - print_count << " more)";
+                    std::cout << "]" << std::endl;
+                }
+            }
+            
             if (outputs.empty() || !outputs.front().IsTensor()) {
                 std::cerr << "[YoloModel] Invalid ONNX output.\n";
                 return detections;
@@ -243,94 +282,38 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const {
             std::vector<int64_t> shape = info.GetShape();
             const float* data = output.GetTensorData<float>();
 
-            if (!data || shape.size() < 2) {
-                std::cerr << "[YoloModel] Output tensor shape invalid.\n";
+            if (shape.size() != 3 || shape[1] != 6) {
+                std::cerr << "[YoloModel] Unexpected output shape.\n";
                 return detections;
             }
 
-            // ============ 3. YOLOv11 输出解析 ============
-            // 支持两种格式：[1, N, 85] 或 [1, 84, N]
-            bool is_yolo11 = (shape.size() == 3 && shape[1] < shape[2]);
+            int num_attrs = static_cast<int>(shape[1]);
+            int num_boxes = static_cast<int>(shape[2]);
+            
+            std::cout << "num_boxes: " << num_boxes << std::endl;
+            std::cout << "==============================================================\n" << std::endl;
 
-            std::size_t num_boxes = 0;
-            std::size_t num_attrs = 0;
+            for (int i = 0; i < num_boxes; ++i) {
+                float x1 = data[0 * num_boxes + i];
+                float y1 = data[1 * num_boxes + i];
+                float x2 = data[2 * num_boxes + i];
+                float y2 = data[3 * num_boxes + i];
+                float conf = data[4 * num_boxes + i];
+                float cls  = data[5 * num_boxes + i];
 
-            if (is_yolo11) {
-                num_attrs = static_cast<std::size_t>(shape[1]);  // e.g. 84
-                num_boxes = static_cast<std::size_t>(shape[2]);  // e.g. 8400
-            } else {
-                num_boxes = static_cast<std::size_t>(shape[1]);
-                num_attrs = static_cast<std::size_t>(shape[2]);
-            }
-
-            // ============ 4. 遍历检测框 ============
-            for (std::size_t i = 0; i < num_boxes; ++i) {
-                float x, y, w, h, obj_conf = 0.0f;
-
-                if (is_yolo11) {
-                    // [1,84,8400] -> 每列为一个框
-                    x = data[i];
-                    y = data[num_boxes + i];
-                    w = data[2 * num_boxes + i];
-                    h = data[3 * num_boxes + i];
-                    obj_conf = data[4 * num_boxes + i];
-                } else {
-                    // [1,8400,85] -> 每行一个框
-                    std::size_t base = i * num_attrs;
-                    x = data[base + 0];
-                    y = data[base + 1];
-                    w = data[base + 2];
-                    h = data[base + 3];
-                    obj_conf = data[base + 4];
-                }
-
-                if (obj_conf < 0.25f)
+                if (conf < 0.01f)
                     continue;
 
-                // 找到最佳类别
-                float best_cls_score = 0.0f;
-                std::size_t best_cls = 0;
-
-                if (is_yolo11) {
-                    for (std::size_t c = 5; c < num_attrs; ++c) {
-                        float cls_conf = data[c * num_boxes + i];
-                        if (cls_conf > best_cls_score) {
-                            best_cls_score = cls_conf;
-                            best_cls = c - 5;
-                        }
-                    }
-                } else {
-                    std::size_t base = i * num_attrs;
-                    for (std::size_t c = 5; c < num_attrs; ++c) {
-                        float cls_conf = data[base + c];
-                        if (cls_conf > best_cls_score) {
-                            best_cls_score = cls_conf;
-                            best_cls = c - 5;
-                        }
-                    }
-                }
-
-                float confidence = obj_conf * best_cls_score;
-                if (confidence < 0.25f)
-                    continue;
-
-                // 将中心坐标转为 (x1, y1, x2, y2)
-                float x1 = x - w / 2.0f;
-                float y1 = y - h / 2.0f;
-                float x2 = x + w / 2.0f;
-                float y2 = y + h / 2.0f;
-
-                Region region;
-                region.x1 = static_cast<int>(std::round(x1));
-                region.y1 = static_cast<int>(std::round(y1));
-                region.x2 = static_cast<int>(std::round(x2));
-                region.y2 = static_cast<int>(std::round(y2));
+                std::cout << "[YoloModel] Detections parsed: " << conf << std::endl;
 
                 Detection det;
-                det.region = region;
-                det.label = "class_" + std::to_string(best_cls);
-                det.confidence = confidence;
-                detections.push_back(std::move(det));
+                det.region.x1 = static_cast<int>(x1);
+                det.region.y1 = static_cast<int>(y1);
+                det.region.x2 = static_cast<int>(x2);
+                det.region.y2 = static_cast<int>(y2);
+                det.label = "class_" + std::to_string(static_cast<int>(cls));
+                det.confidence = conf;
+                detections.push_back(det);
             }
 
         } catch (const Ort::Exception& ex) {
@@ -338,7 +321,6 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const {
             detections.clear();
         }
     }
-#endif
 
     std::cout << "[YoloModel] Inference completed. Detections: " << detections.size() << std::endl;
     return detections;

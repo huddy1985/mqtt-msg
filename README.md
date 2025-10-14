@@ -47,7 +47,7 @@ cmake --build build
 默认会自动检测 ONNX Runtime 与 libmosquitto，若安装路径非标准位置可通过
 `ONNXRUNTIME_ROOT` 或 `MOSQUITTO_ROOT` 环境变量指向安装目录。
 
-生成的可执行文件位于 `build/mqtt_msg`。
+生成的可执行文件位于 `build/InspectAT`。
 
 ## 配置说明
 
@@ -128,7 +128,7 @@ cmake --build build
 ### 后台服务模式（默认）
 
 ```bash
-./build/mqtt_msg --config local.config.json
+./build/InspectAI --config local.config.json
 ```
 
 程序会：
@@ -153,9 +153,9 @@ cmake --build build
 用于本地调试或在未部署 MQTT 服务的环境下执行单次分析：
 
 ```bash
-./build/mqtt_msg --config local.config.json --command config/sample_command.json
+./build/InspectAI --config local.config.json --command config/sample_command.json
 # 或者从标准输入读取命令
-./build/mqtt_msg --config local.config.json --oneshot <<'JSON'
+./build/InspectAI --config local.config.json --oneshot <<'JSON'
 {
   "scenario_id": ["steam_detection", "liquid_leak_detection"],
   "detection_regions": [[0, 0, 100, 100]],

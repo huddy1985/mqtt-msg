@@ -17,8 +17,7 @@
 namespace app {
 
 struct CnnModel::Impl {
-#ifdef APP_HAS_ONNXRUNTIME
-    Impl() : env(ORT_LOGGING_LEVEL_WARNING, "mqtt_msg") {}
+    Impl() : env(ORT_LOGGING_LEVEL_WARNING, "InspectAI") {}
 
     Ort::Env env;
     Ort::SessionOptions session_options;
@@ -28,7 +27,6 @@ struct CnnModel::Impl {
     std::vector<std::string> output_names;
     std::vector<const char*> output_name_ptrs;
     std::vector<int64_t> input_shape;
-#endif
 };
 
 namespace {
@@ -73,7 +71,6 @@ bool CnnModel::load() {
 
     impl_ = std::make_unique<Impl>();
 
-#ifdef APP_HAS_ONNXRUNTIME
     impl_->session_options.SetIntraOpNumThreads(1);
     impl_->session_options.SetGraphOptimizationLevel(ORT_ENABLE_EXTENDED);
     impl_->session = std::make_unique<Ort::Session>(impl_->env, model_path.c_str(), impl_->session_options);
@@ -113,7 +110,6 @@ bool CnnModel::load() {
             }
         }
     }
-#endif
 
     loaded_ = true;
     return true;
@@ -148,7 +144,6 @@ std::vector<Detection> CnnModel::infer(const CapturedFrame& frame) const {
         return predictions;
     }
 
-#ifdef APP_HAS_ONNXRUNTIME
     if (impl_ && impl_->session) {
         try {
             std::vector<int64_t> input_shape = impl_->input_shape;
@@ -207,8 +202,7 @@ std::vector<Detection> CnnModel::infer(const CapturedFrame& frame) const {
             predictions.clear();
         }
     }
-#endif
-
+    
     if (predictions.empty()) {
         std::uint64_t hash = fingerprint(frame.data);
         double scaled = static_cast<double>((hash % 1000ull)) / 1000.0;
