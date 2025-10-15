@@ -39,8 +39,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--input-shape",
         dest="input_shape",
         type=parse_shape,
-        default=parse_shape("1x3x224x224"),
-        help="Input tensor shape as NxCxHxW (default: 1x3x224x224)",
+        default=parse_shape("1x3x128x128"),
+        help="Input tensor shape as NxCxHxW (default: 1x3x128x128)",
     )
     parser.add_argument(
         "--opset",
