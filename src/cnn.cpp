@@ -146,6 +146,14 @@ std::vector<Detection> CnnModel::infer(const CapturedFrame& frame) const {
 
     if (impl_ && impl_->session) {
         try {
+            cv::Mat encoded(1, frame.data.size(), CV_8UC1, const_cast<uint8_t*>(frame.data.data()));
+            cv::Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR);
+
+            if (image.empty()) {
+                std::cerr << "Failed to decode image" << std::endl;
+                return predictions;
+            }
+
             std::vector<int64_t> input_shape = impl_->input_shape;
             if (input_shape.empty()) {
                 input_shape = {1, static_cast<int64_t>(frame.data.size())};
@@ -185,7 +193,6 @@ std::vector<Detection> CnnModel::infer(const CapturedFrame& frame) const {
                 auto type_info = outputs.front().GetTensorTypeAndShapeInfo();
                 std::size_t output_elements = type_info.GetElementCount();
                 
-                // 修改：显式指定 GetTensorData 的模板参数为 float
                 const float* data = outputs.front().GetTensorData<float>(); // 显式指定模板参数为 float
 
                 if (data && output_elements > 0) {

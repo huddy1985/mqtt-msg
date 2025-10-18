@@ -156,10 +156,10 @@ simplejson::JsonValue detectionToJson(const app::DetectionResult& detection) {
     obj["label"] = detection.label;
     simplejson::JsonValue region = simplejson::makeArray();
     auto& arr = region.asArray();
-    arr.push_back(detection.region.x1);
-    arr.push_back(detection.region.y1);
-    arr.push_back(detection.region.x2);
-    arr.push_back(detection.region.y2);
+    arr.push_back(detection.region.x);
+    arr.push_back(detection.region.y);
+    arr.push_back(detection.region.width);
+    arr.push_back(detection.region.height);
     obj["region"] = region;
     obj["confidence"] = detection.confidence;
     obj["filtered"] = detection.filtered;
@@ -268,10 +268,10 @@ int main(int argc, char* argv[]) {
                     for (const auto& region : command.detection_regions) {
                         simplejson::JsonValue regionValue = simplejson::makeArray();
                         auto& regionArray = regionValue.asArray();
-                        regionArray.push_back(region.x1);
-                        regionArray.push_back(region.y1);
-                        regionArray.push_back(region.x2);
-                        regionArray.push_back(region.y2);
+                        regionArray.push_back(region.x);
+                        regionArray.push_back(region.y);
+                        regionArray.push_back(region.width);
+                        regionArray.push_back(region.height);
                         regionsArray.push_back(regionValue);
                     }
                     commandObj["detection_regions"] = regionsValue;
@@ -283,10 +283,10 @@ int main(int argc, char* argv[]) {
                     for (const auto& region : command.filter_regions) {
                         simplejson::JsonValue regionValue = simplejson::makeArray();
                         auto& regionArray = regionValue.asArray();
-                        regionArray.push_back(region.x1);
-                        regionArray.push_back(region.y1);
-                        regionArray.push_back(region.x2);
-                        regionArray.push_back(region.y2);
+                        regionArray.push_back(region.x);
+                        regionArray.push_back(region.y);
+                        regionArray.push_back(region.width);
+                        regionArray.push_back(region.height);
                         regionsArray.push_back(regionValue);
                     }
                     commandObj["filter_regions"] = regionsValue;
@@ -458,10 +458,10 @@ int main(int argc, char* argv[]) {
                     for (const auto& region : command.detection_regions) {
                         simplejson::JsonValue regionValue = simplejson::makeArray();
                         auto& regionArray = regionValue.asArray();
-                        regionArray.push_back(region.x1);
-                        regionArray.push_back(region.y1);
-                        regionArray.push_back(region.x2);
-                        regionArray.push_back(region.y2);
+                        regionArray.push_back(region.x);
+                        regionArray.push_back(region.y);
+                        regionArray.push_back(region.width);
+                        regionArray.push_back(region.height);
                         regionsArray.push_back(regionValue);
                     }
                     commandObj["detection_regions"] = regionsValue;
@@ -473,10 +473,10 @@ int main(int argc, char* argv[]) {
                     for (const auto& region : command.filter_regions) {
                         simplejson::JsonValue regionValue = simplejson::makeArray();
                         auto& regionArray = regionValue.asArray();
-                        regionArray.push_back(region.x1);
-                        regionArray.push_back(region.y1);
-                        regionArray.push_back(region.x2);
-                        regionArray.push_back(region.y2);
+                        regionArray.push_back(region.x);
+                        regionArray.push_back(region.y);
+                        regionArray.push_back(region.width);
+                        regionArray.push_back(region.height);
                         regionsArray.push_back(regionValue);
                     }
                     commandObj["filter_regions"] = regionsValue;

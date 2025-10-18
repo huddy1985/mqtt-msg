@@ -64,10 +64,10 @@ std::vector<Detection> fallbackDetections(std::uint64_t hash, const std::vector<
         } else {
             int base = static_cast<int>((hash >> (i * 8)) & 0xFFull);
             int span = 40 + (base % 80);
-            region.x1 = (base * 13) % 320;
-            region.y1 = (base * 7) % 240;
-            region.x2 = region.x1 + span;
-            region.y2 = region.y1 + span;
+            region.x = (base * 13) % 320;
+            region.y = (base * 7) % 240;
+            region.width = region.x + span;
+            region.height = region.y + span;
         }
 
         double confidence_seed = static_cast<double>((hash >> (i * 13)) & 0x3FFull) / 1024.0;
@@ -210,11 +210,19 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
     if (impl_ && impl_->session) {
         try {
             // ============ 1. 构造输入张量 ============
-            cv::Mat image = cv::imdecode(frame.data, cv::IMREAD_COLOR);  // 这里使用 IMREAD_COLOR 读取彩色图像
+            cv::Mat encoded(1, frame.data.size(), CV_8UC1, const_cast<uint8_t*>(frame.data.data()));
+            cv::Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR);
+
             if (image.empty()) {
                 std::cerr << "Failed to decode image" << std::endl;
                 return detections;
             }
+
+            // Region rects = config_.detection_regions;
+
+            #ifdef _DEBUG_
+
+            #endif
 
             auto prep = preprocess_letterbox(image, INPUT_WIDTH, INPUT_HEIGHT);
 
@@ -268,10 +276,15 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
                     continue;
 
                 Detection det;
-                det.region.x1 = (static_cast<int>(x1) - prep.pad_x)/prep.scale;
-                det.region.y1 = (static_cast<int>(y1) - prep.pad_y)/prep.scale;
-                det.region.x2 = (static_cast<int>(x2) - prep.pad_x)/prep.scale;
-                det.region.y2 = (static_cast<int>(y2) - prep.pad_y)/prep.scale;
+                det.region.x = (x1 - prep.pad_x)/prep.scale;
+                det.region.y = (y1 - prep.pad_y)/prep.scale;
+                det.region.width = (x2 - prep.pad_x)/prep.scale;
+                det.region.height = (y2 - prep.pad_y)/prep.scale;
+
+                det.region.x = std::max(det.region.x, 0);  // 确保坐标在 [0, 原始宽度]
+                det.region.y = std::max(det.region.y, 0);  // 同上
+                det.region.width = std::min(det.region.width, static_cast<int>(image.cols)); // 防止越界
+                det.region.height = std::min(det.region.height, static_cast<int>(image.rows)); // 防止越界
 
                 std::vector<std::string> labels = config_.labels;
                 int cls_idx = static_cast<int>(cls);

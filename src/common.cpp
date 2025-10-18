@@ -1,4 +1,5 @@
 #include "app/common.hpp"
+#include "app/rtsp.hpp"
 
 #include <ifaddrs.h>
 #include <net/if.h>
@@ -19,10 +20,10 @@ Region parseRegion(const simplejson::JsonValue& value)
         throw std::runtime_error("Region must contain four numbers");
     }
     Region region;
-    region.x1 = static_cast<int>(arr[0].asNumber());
-    region.y1 = static_cast<int>(arr[1].asNumber());
-    region.x2 = static_cast<int>(arr[2].asNumber());
-    region.y2 = static_cast<int>(arr[3].asNumber());
+    region.x = static_cast<int>(arr[0].asNumber());
+    region.y = static_cast<int>(arr[1].asNumber());
+    region.width = static_cast<int>(arr[2].asNumber());
+    region.height = static_cast<int>(arr[3].asNumber());
     return region;
 }
 
@@ -145,13 +146,36 @@ PreprocessInfo preprocess_letterbox(const cv::Mat& img, int input_w, int input_h
     cv::split(float_img, chw);
 
     std::vector<float> input_tensor;
+    input_tensor.reserve(input_w * input_h * 3);  // 预留足够空间，提高效率
     for (int c = 0; c < 3; ++c) {
         input_tensor.insert(input_tensor.end(),
                             (float*)chw[c].datastart,
                             (float*)chw[c].dataend);
-    }   
+    }
 
     return {input_tensor, scale, pad_x, pad_y, letterbox};
+}
+
+cv::Mat decodeFrameToMat(const CapturedFrame& frame)
+{
+    cv::Mat encoded(1, frame.data.size(), CV_8UC1, const_cast<uint8_t*>(frame.data.data()));
+
+    cv::Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR);
+    if (image.empty()) {
+        throw std::runtime_error("Failed to decode JPEG frame");
+    }
+    return image;
+}
+
+cv::Mat extractROI(const cv::Mat& image, int x, int y, int width, int height)
+{
+    if (x < 0 || y < 0 || x + width > image.cols || y + height > image.rows) {
+        throw std::runtime_error("ROI out of bounds");
+    }
+
+    cv::Rect roi(x, y, width, height);
+
+    return image(roi).clone();
 }
 
 };

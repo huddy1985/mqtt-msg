@@ -71,10 +71,10 @@ simplejson::JsonValue toJson(const AnalysisResult& result) {
             detectionMap["label"] = detection.label;
             simplejson::JsonValue regionValue = simplejson::makeArray();
             auto& regionArray = regionValue.asArray();
-            regionArray.push_back(detection.region.x1);
-            regionArray.push_back(detection.region.y1);
-            regionArray.push_back(detection.region.x2);
-            regionArray.push_back(detection.region.y2);
+            regionArray.push_back(detection.region.x);
+            regionArray.push_back(detection.region.y);
+            regionArray.push_back(detection.region.width);
+            regionArray.push_back(detection.region.height);
             detectionMap["region"] = regionValue;
             detectionMap["confidence"] = detection.confidence;
             detectionMap["filtered"] = detection.filtered;
@@ -374,8 +374,8 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
                 synthetic.format = "synthetic";
                 synthetic.data.reserve(regions.size() * 4 + scenarioConfig->id.size());
                 for (const auto& region : regions) {
-                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x1 + region.y1) & 0xFF));
-                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x2 + region.y2) & 0xFF));
+                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x + region.y) & 0xFF));
+                    synthetic.data.push_back(static_cast<std::uint8_t>((region.width + region.height) & 0xFF));
                 }
                 for (char ch : scenarioConfig->id) {
                     synthetic.data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
@@ -406,8 +406,8 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
                 synthetic.format = "synthetic";
                 synthetic.data.reserve(regions.size() * 4 + scenarioConfig->id.size());
                 for (const auto& region : regions) {
-                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x1 ^ region.y2) & 0xFF));
-                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x2 ^ region.y1) & 0xFF));
+                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x ^ region.height) & 0xFF));
+                    synthetic.data.push_back(static_cast<std::uint8_t>((region.width ^ region.y) & 0xFF));
                 }
                 for (char ch : scenarioConfig->id) {
                     synthetic.data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));

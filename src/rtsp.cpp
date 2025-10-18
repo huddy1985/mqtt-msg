@@ -39,14 +39,13 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
     }
 
     std::ostringstream command;
-    command << "ffmpeg -nostdin -rtsp_transport tcp -loglevel error ";
+    command << "ffmpeg -nostdin -rtsp_transport tcp -loglevel debug ";
     if (timeout.count() > 0) {
         // stimeout expects microseconds
         command << "-stimeout " << (timeout.count() * 1000) << ' ';
     }
     command << "-i '" << buildRtspUrl() << "' ";
     command << "-vf fps=" << fps << ' ';
-    command << "-s 1920x1080 ";
     command << "-vframes " << max_frames << ' ';
     command << "-vcodec mjpeg -f image2pipe - 2>/dev/null";
 

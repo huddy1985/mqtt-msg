@@ -9,13 +9,13 @@
 namespace app {
 
 struct Region {
-    int x1 = 0;
-    int y1 = 0;
-    int x2 = 0;
-    int y2 = 0;
+    int x = 0;     // left x
+    int y = 0;     // left y
+    int width = 0;     // width
+    int height = 0;     // height
 
     bool operator==(const Region& other) const {
-        return x1 == other.x1 && y1 == other.y1 && x2 == other.x2 && y2 == other.y2;
+        return x == other.x && y == other.y && width == other.width && height == other.height;
     }
 };
 
@@ -52,5 +52,10 @@ struct InferResult {
 };
 
 PreprocessInfo preprocess_letterbox(const cv::Mat& img, int input_w, int input_h);
+
+struct CapturedFrame;
+cv::Mat decodeFrameToMat(const CapturedFrame& frame);
+cv::Mat extractROI(const cv::Mat& image, int x, int y, int width, int height);
+
 
 } // namespace app
