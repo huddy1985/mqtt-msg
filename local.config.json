@@ -1,4 +1,5 @@
 {
+  "version": "0.9.121",
   "mqtt": {
     "client_id": "edge-analytics-client",
     "port": 1883,
