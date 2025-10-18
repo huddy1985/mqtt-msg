@@ -6,6 +6,7 @@
 #include <cstring>
 #include <memory>
 #include <sstream>
+#include <thread>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -30,12 +31,90 @@ std::string RtspFrameGrabber::buildRtspUrl() const {
 
 std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
                                                      std::size_t max_frames,
-                                                     std::chrono::milliseconds timeout) const {
+                                                     std::chrono::milliseconds timeout) const
+{
+    using clock = std::chrono::steady_clock;
+    const auto t0 = clock::now();
+
     if (fps <= 0.0) {
         throw std::invalid_argument("FPS must be positive for RTSP capture");
     }
     if (max_frames == 0) {
         return {};
+    }
+
+    std::vector<CapturedFrame> frames;
+    frames.reserve(max_frames);
+
+    const auto frame_interval = std::chrono::duration<double>(1.0 / fps);
+    auto last_ts = t0;
+
+    const std::string path = config_.path;
+    const bool use_camera = (path.rfind("/dev/video", 0) == 0);
+
+    if (use_camera) {
+        // ===== 摄像头分支（仅当 path 形如 /dev/videoX）=====
+        cv::VideoCapture cap;
+        // 从 /dev/videoN 中解析设备索引
+        int index = 0;
+        try {
+            index = std::stoi(path.substr(std::string("/dev/video").size()));
+        } catch (...) {
+            index = 0;
+        }
+        if (!cap.open(index)) {
+            throw std::runtime_error("Failed to open local camera: " + path);
+        }
+
+        int w = (config_.width  > 0 ? config_.width  : 1920);
+        int h = (config_.height > 0 ? config_.height : 1080);
+
+        cap.set(cv::CAP_PROP_FRAME_WIDTH,  w);
+        cap.set(cv::CAP_PROP_FRAME_HEIGHT, h);
+        cap.set(cv::CAP_PROP_FPS,          fps);
+        
+        // 若摄像头支持 MJPG，可降低 CPU（不支持时忽略）
+        cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('M','J','P','G'));
+
+        while (frames.size() < max_frames) {
+            const auto now = clock::now();
+            if (now - t0 > timeout) break;
+
+            // 控制采样节奏
+            const auto since_last = now - last_ts;
+            if (since_last < frame_interval) {
+                std::this_thread::sleep_for(frame_interval - since_last);
+            }
+            last_ts = clock::now();
+
+            cv::Mat mat;
+            if (!cap.read(mat) || mat.empty()) {
+                // 允许短暂获取失败，直到超时
+                if (clock::now() - t0 > timeout) break;
+                continue;
+            }
+
+            // 编码为 JPEG
+            std::vector<uchar> buf;
+            std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, 90};
+            if (!cv::imencode(".jpg", mat, buf, params)) {
+                if (clock::now() - t0 > timeout) break;
+                continue;
+            }
+
+            CapturedFrame f;
+            f.timestamp = std::chrono::duration<double>(clock::now() - t0).count();
+            f.data.assign(buf.begin(), buf.end());
+            f.format = "jpeg";
+            frames.emplace_back(std::move(f));
+        }
+
+        cap.release();
+
+        if (frames.empty()) {
+            throw std::runtime_error("RTSP capture produced no frames (source=camera:" + path + ")");
+        }
+        return frames;
     }
 
     std::ostringstream command;
@@ -47,7 +126,7 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
     command << "-i '" << buildRtspUrl() << "' ";
     command << "-vf fps=" << fps << ' ';
     command << "-vframes " << max_frames << ' ';
-    command << "-vcodec mjpeg -f image2pipe - 2>/dev/null";
+    command << "-vcodec mjpeg -q:v 2 -f image2pipe - 2>/dev/null";
 
     int exitStatus = 0;
     auto closer = [&exitStatus](FILE* f) {
@@ -61,11 +140,8 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
         throw std::runtime_error("Failed to execute ffmpeg for RTSP capture");
     }
 
-    std::vector<CapturedFrame> frames;
-    frames.reserve(max_frames);
-
     std::vector<std::uint8_t> frameBuffer;
-    frameBuffer.reserve(1024 * 1024);
+    frameBuffer.reserve(1024 * 1024 * 3);
 
     std::array<std::uint8_t, 4096> buffer{};
     std::uint8_t previous = 0;

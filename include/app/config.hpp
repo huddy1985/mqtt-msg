@@ -22,6 +22,9 @@ struct RtspConfig {
     int port = 0;
     std::string path;
     
+    int width;
+    int height;
+
     int frame_rate{1};
     std::string output_dir;
 };

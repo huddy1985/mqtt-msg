@@ -12,11 +12,13 @@
     "heartbeat_time": 10
   },
   "rtsp": {
-    "host": "127.0.0.1",
-    "path": "/live.stream",
+    "host": "192.168.10.10",
+    "path": "/SinoWin",
     "port": 8554,
     "width": 1920,
-    "height": 1080
+    "height": 1080,
+    "frame_rate": 1,
+    "output_dir": "/tmp/"
   },
   "scenarios": [
     {
@@ -35,7 +37,7 @@
       "id": "ash_powder_detection"
     },
     {
-      "active": false,
+      "active": true,
       "config": "config/scenario_liquid_leak_detection.json",
       "id": "liquid_leak_detection"
     }

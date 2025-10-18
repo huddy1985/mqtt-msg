@@ -210,8 +210,7 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
     if (impl_ && impl_->session) {
         try {
             // ============ 1. 构造输入张量 ============
-            cv::Mat encoded(1, frame.data.size(), CV_8UC1, const_cast<uint8_t*>(frame.data.data()));
-            cv::Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR);
+            cv::Mat image = cv::imdecode(frame.data, cv::IMREAD_COLOR);
 
             if (image.empty()) {
                 std::cerr << "Failed to decode image" << std::endl;
@@ -245,8 +244,151 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
 
             std::cout << "\n=========== [ONNX DEBUG] Session->Run() Output Info ===========" << std::endl;
             std::cout << "Output tensor count: " << outputs.size() << std::endl;
+
+            std::vector<int64_t> output_shape;
+
+            float* output_data = outputs[0].GetTensorMutableData<float>();
+            auto tensor_info = outputs[0].GetTensorTypeAndShapeInfo();
+            output_shape = tensor_info.GetShape();
+
+            size_t total_len = 1;
+            for (auto s : output_shape) total_len *= s;
+
+            std::vector<float> output(output_data, output_data + total_len);
+            std::cout << "[INFO] Inference done. Output shape = [";
+            for (auto s : output_shape) std::cout << s << " ";
+            std::cout << "]" << std::endl;
+
+            int64_t dim1 = output_shape[1];
+            int64_t dim2 = output_shape[2];
+            bool transposed = false;
+            int num_det = 0, num_attrs = 0;
+
+            if (dim1 > dim2) {
+                num_det = dim1;
+                num_attrs = dim2;
+            } else {
+                num_det = dim2;
+                num_attrs = dim1;
+                transposed = true;
+            }
+
+            std::vector<float> detections(num_det * num_attrs);
+
+            if (transposed) {
+                for (int i = 0; i < num_attrs; i++)
+                    for (int j = 0; j < num_det; j++)
+                        detections[j * num_attrs + i] = output[i * num_det + j];
+            } else {
+                detections = output;
+            }
+
+            // ---------- sigmoid 激活 ----------
+            auto sigmoid = [](float x) { return 1.0f / (1.0f + std::exp(-x)); };
+            for (float &v : detections) v = sigmoid(v);
+
+            int num_classes = std::max(0, num_attrs - 5);
+            std::cout << "[INFO] Detected boxes: " << num_det
+                    << ", num_classes=" << num_classes << std::endl;
+
+            std::vector<cv::Rect2f> boxes;
+            std::vector<float> scores;
+            std::vector<int> class_ids;
+
+            for (int i = 0; i < num_det; i++) {
+                float cx = detections[i * num_attrs + 0];
+                float cy = detections[i * num_attrs + 1];
+                float w  = detections[i * num_attrs + 2];
+                float h  = detections[i * num_attrs + 3];
+                float conf = detections[i * num_attrs + 4];
+
+                int cls_id = 0;
+                if (num_classes > 0) {
+                    float obj_conf = conf;
+                    float max_prob = -1;
+                    for (int c = 0; c < num_classes; c++) {
+                        float prob = detections[i * num_attrs + 5 + c];
+                        if (prob > max_prob) {
+                            max_prob = prob;
+                            cls_id = c;
+                        }
+                    }
+                    conf = obj_conf * max_prob;
+                }
+
+                if (conf > 0.5f) {
+                    // ===== 修复：相对坐标转像素坐标 =====
+                    float x1 = (cx - w / 2.0f) * 640.0f;
+                    float y1 = (cy - h / 2.0f) * 640.0f;
+                    float x2 = (cx + w / 2.0f) * 640.0f;
+                    float y2 = (cy + h / 2.0f) * 640.0f;
+
+                    // 映射回原图尺寸
+                    float scale_x = static_cast<float>(image.cols) / 640.0f;
+                    float scale_y = static_cast<float>(image.rows) / 640.0f;
+                    x1 *= scale_x; x2 *= scale_x;
+                    y1 *= scale_y; y2 *= scale_y;
+
+                    x1 = std::clamp(x1, 0.0f, (float)image.cols - 1);
+                    y1 = std::clamp(y1, 0.0f, (float)image.rows - 1);
+                    x2 = std::clamp(x2, 0.0f, (float)image.cols - 1);
+                    y2 = std::clamp(y2, 0.0f, (float)image.rows - 1);
+
+                    boxes.emplace_back(x1, y1, x2 - x1, y2 - y1);
+                    scores.push_back(conf);
+                    class_ids.push_back(cls_id);
+                }
+            }
+
+            auto keep = NMS(boxes, scores, 0.45f);
+
+
+            for (int idx : keep) {
+                Detection det;
+
+                cv::Rect2f box = boxes[idx];
+                float conf = scores[idx];
+                int cls_id = class_ids[idx];
+
+                std::vector<std::string> labels = config_.labels;
+                
+                if ( cls_id < labels.size()) {
+                    det.label = "class_" + labels[cls_id];
+                } else {
+                    det.label = "class_" + std::to_string(cls_id);
+                }
+                
+                std::string label = det.label;
+
+                std::cout << "Detected: " << label
+                        << " conf=" << conf
+                        << " box=(" << box.x << "," << box.y << ","
+                        << box.x + box.width << "," << box.y + box.height << ")\n";
+
+                cv::rectangle(image, box, {0,255,0}, 2);
+                cv::putText(image, label + " " + std::to_string(conf),
+                            cv::Point((int)box.x, (int)box.y - 5),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.6, {0,255,0}, 2);
+            }
+
+            cv::imwrite("/tmp/result.jpg", image);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
             
-            if (outputs.empty() || !outputs.front().IsTensor()) {
+            /* if (outputs.empty() || !outputs.front().IsTensor()) {
                 std::cerr << "[YoloModel] Invalid ONNX output.\n";
                 return detections;
             }
@@ -255,6 +397,11 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
             auto info = output.GetTensorTypeAndShapeInfo();
             std::vector<int64_t> shape = info.GetShape();
             const float* data = output.GetTensorData<float>();
+
+            std::cout << "shape size: " << shape.size() << std::endl;
+            for (auto it = shape.begin(); it != shape.end(); it++) {
+                std::cout << " " << *it;
+            }
 
             if (shape.size() != 3 || shape[1] != 6) {
                 std::cerr << "[YoloModel] Unexpected output shape.\n";
@@ -302,7 +449,7 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
                     " label: " << det.label << std::endl;
             }
 
-            std::cout << "==============================================================\n" << std::endl;
+            std::cout << "==============================================================\n" << std::endl; */
 
         } catch (const Ort::Exception& ex) {
             std::cerr << "[YoloModel] Inference failed: " << ex.what() << std::endl;

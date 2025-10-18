@@ -3,10 +3,12 @@
   "name": "Liquid leak detection",
   "description": "Locates potential liquid leaks around pipelines and tanks using YOLOv11.",
   "model": {
-    "id": "yolo11_liquid",
-    "type": "yolo11",
-    "path": "models/yolo11_traffic.onnx"
+    "id": "droplet",
+    "type": "yolo",
+    "path": "models/droplet.onnx"
   },
+  "mode": "continuous",
+  "action": "enable",
   "detection_regions": [
     [
       0,
@@ -23,8 +25,7 @@
       400
     ]
   ],
-  "postprocessing": {
-    "confidence_threshold": 0.3,
-    "iou_threshold": 0.4
-  }
+  "confidence_threshold": 0.5,
+  "iou_threshold": 0.5,
+  "labels": ["droplet"]
 }

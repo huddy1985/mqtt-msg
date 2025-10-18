@@ -178,4 +178,33 @@ cv::Mat extractROI(const cv::Mat& image, int x, int y, int width, int height)
     return image(roi).clone();
 }
 
+std::vector<int> NMS(const std::vector<cv::Rect2f>& boxes,
+                     const std::vector<float>& scores,
+                     float iouThreshold) {
+    std::vector<int> indices;
+    std::vector<int> order(boxes.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(),
+              [&](int i, int j) { return scores[i] > scores[j]; });
+
+    std::vector<bool> suppressed(boxes.size(), false);
+    for (size_t i = 0; i < order.size(); i++) {
+        int idx = order[i];
+        if (suppressed[idx]) continue;
+        indices.push_back(idx);
+        for (size_t j = i + 1; j < order.size(); j++) {
+            int idx2 = order[j];
+            if (IoU(boxes[idx], boxes[idx2]) > iouThreshold)
+                suppressed[idx2] = true;
+        }
+    }
+    return indices;
+}
+
+float IoU(const cv::Rect2f& a, const cv::Rect2f& b) {
+    float interArea = (a & b).area();
+    float unionArea = a.area() + b.area() - interArea;
+    return interArea / unionArea;
+}
+
 };

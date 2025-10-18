@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <numeric>
 #include <opencv2/opencv.hpp>
 
 #include "app/json.hpp"
@@ -56,6 +57,11 @@ PreprocessInfo preprocess_letterbox(const cv::Mat& img, int input_w, int input_h
 struct CapturedFrame;
 cv::Mat decodeFrameToMat(const CapturedFrame& frame);
 cv::Mat extractROI(const cv::Mat& image, int x, int y, int width, int height);
+
+std::vector<int> NMS(const std::vector<cv::Rect2f>& boxes,
+                     const std::vector<float>& scores,
+                     float iouThreshold = 0.45f);
+float IoU(const cv::Rect2f& a, const cv::Rect2f& b);
 
 
 } // namespace app
