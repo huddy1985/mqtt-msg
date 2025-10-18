@@ -1,0 +1,13 @@
+train: /home/charlies/project/zhongying/droplet/dataset/train/images
+val: /home/charlies/project/zhongying/droplet/dataset/valid/images
+test: /home/charlies/project/zhongying/droplet/dataset/test/images
+
+nc: 1
+names: ['droplet']
+
+roboflow:
+  workspace: leak-adhw8
+  project: leak-pzu8f
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/leak-adhw8/leak-pzu8f/dataset/1

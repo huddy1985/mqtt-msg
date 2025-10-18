@@ -1,0 +1,5 @@
+[INFO] Loaded 1 class names.
+[INFO] Model loaded: ./best.onnx
+[INFO] Inference done. Output shape = [1 5 8400 ]
+[INFO] Detected boxes: 8400, num_classes=0
+[INFO] Saved visualization to result.jpg
