@@ -13,7 +13,7 @@
   },
   "rtsp": {
     "host": "127.0.0.1",
-    "path": "/live.stream",
+    "path": "/SinoWin",
     "port": 8554,
     "width": 1920,
     "height": 1080
@@ -35,7 +35,7 @@
       "id": "ash_powder_detection"
     },
     {
-      "active": false,
+      "active": true,
       "config": "config/scenario_liquid_leak_detection.json",
       "id": "liquid_leak_detection"
     }
