@@ -273,8 +273,8 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
             // 预备：类别名映射（label=2 要求输出真实类别名）
             // 如果配置里没有提供类别名，则回退为 "class_0/1/..."
             std::vector<std::string> class_names;
-            if (!config_.model.class_names.empty() && static_cast<int>(config_.model.class_names.size()) == num_classes) {
-                class_names = config_.model.class_names;
+            if (!config_.labels.empty() && static_cast<int>(config_.labels.size()) == num_classes) {
+                class_names = config_.labels;
             } else {
                 class_names.resize(num_classes);
                 for (int c = 0; c < num_classes; ++c) class_names[c] = "class_" + std::to_string(c);
