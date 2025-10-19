@@ -283,6 +283,7 @@ void ProcessingPipeline::add_missing(const std::string &scenario_id) {
         std::cerr << "Scenario " << scenario_id << " not found in configuration map\n";
         return;
     }
+    
     try {
         ScenarioDefinition def = store_->load_scenario_file(path_it->config_path);
         if (def.id.empty()) {

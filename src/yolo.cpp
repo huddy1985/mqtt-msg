@@ -237,15 +237,12 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
 
             // ============ 2. 推理 ============
             auto outputs = impl_->session->Run(Ort::RunOptions{},
-                                               impl_->input_name_ptrs.data(),
-                                               &input_tensor_val,
-                                               1,
-                                               impl_->output_name_ptrs.data(),
-                                               impl_->output_name_ptrs.size());
+                                            impl_->input_name_ptrs.data(),
+                                            &input_tensor_val,
+                                            1,
+                                            impl_->output_name_ptrs.data(),
+                                            impl_->output_name_ptrs.size());
 
-            std::cout << "\n=========== [ONNX DEBUG] Session->Run() Output Info ===========" << std::endl;
-            std::cout << "Output tensor count: " << outputs.size() << std::endl;
-            
             if (outputs.empty() || !outputs.front().IsTensor()) {
                 std::cerr << "[YoloModel] Invalid ONNX output.\n";
                 return detections;
@@ -256,52 +253,138 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
             std::vector<int64_t> shape = info.GetShape();
             const float* data = output.GetTensorData<float>();
 
-            if (shape.size() != 3 || shape[1] != 6) {
-                std::cerr << "[YoloModel] Unexpected output shape.\n";
+            // 自适配 YOLO 输出 [1, C, N]，其中 C = 4 + num_classes
+            if (shape.size() != 3 || shape[0] != 1) {
+                std::cerr << "[YoloModel] Unexpected output shape: ["
+                        << (shape.size() > 0 ? std::to_string(shape[0]) : "?") << ","
+                        << (shape.size() > 1 ? std::to_string(shape[1]) : "?") << ","
+                        << (shape.size() > 2 ? std::to_string(shape[2]) : "?") << "]\n";
                 return detections;
             }
 
-            int num_attrs = static_cast<int>(shape[1]);
-            int num_boxes = static_cast<int>(shape[2]);
+            const int num_attrs   = static_cast<int>(shape[1]); // 5/6/7/...
+            const int num_boxes   = static_cast<int>(shape[2]);
+            const int num_classes = num_attrs - 4;
+            if (num_classes <= 0) {
+                std::cerr << "[YoloModel] num_classes <= 0\n";
+                return detections;
+            }
+
+            // 预备：类别名映射（label=2 要求输出真实类别名）
+            // 如果配置里没有提供类别名，则回退为 "class_0/1/..."
+            std::vector<std::string> class_names;
+            if (!config_.model.class_names.empty() && static_cast<int>(config_.model.class_names.size()) == num_classes) {
+                class_names = config_.model.class_names;
+            } else {
+                class_names.resize(num_classes);
+                for (int c = 0; c < num_classes; ++c) class_names[c] = "class_" + std::to_string(c);
+            }
+
+            // 先收集所有通过阈值的候选框（class-agnostic，取每个框的best class）
+            struct Cand {
+                int   cls;
+                float score;
+                float x1, y1, x2, y2;  // 注意：你当前代码把 region.width/height 用作 x2/y2
+            };
+            std::vector<Cand> cands;
+            cands.reserve(std::min(num_boxes, 20000)); // 防御性预留
 
             for (int i = 0; i < num_boxes; ++i) {
                 float x1 = data[0 * num_boxes + i];
                 float y1 = data[1 * num_boxes + i];
                 float x2 = data[2 * num_boxes + i];
                 float y2 = data[3 * num_boxes + i];
-                float conf = data[4 * num_boxes + i];
-                float cls  = data[5 * num_boxes + i];
 
-                if (conf < config_.threshold)
-                    continue;
-
-                Detection det;
-                det.region.x = (x1 - prep.pad_x)/prep.scale;
-                det.region.y = (y1 - prep.pad_y)/prep.scale;
-                det.region.width = (x2 - prep.pad_x)/prep.scale;
-                det.region.height = (y2 - prep.pad_y)/prep.scale;
-
-                det.region.x = std::max(det.region.x, 0);  // 确保坐标在 [0, 原始宽度]
-                det.region.y = std::max(det.region.y, 0);  // 同上
-                det.region.width = std::min(det.region.width, static_cast<int>(image.cols)); // 防止越界
-                det.region.height = std::min(det.region.height, static_cast<int>(image.rows)); // 防止越界
-
-                std::vector<std::string> labels = config_.labels;
-                int cls_idx = static_cast<int>(cls);
-                if ( cls_idx < labels.size()) {
-                    det.label = "class_" + labels[cls_idx];
-                } else {
-                    det.label = "class_" + std::to_string(static_cast<int>(cls));
+                // 遍历类别，取最高分及其类别ID（ONNX里已含 Softmax/Sigmoid，不要重复做）
+                int   best_cls   = -1;
+                float best_score = -1.0f;
+                for (int c = 0; c < num_classes; ++c) {
+                    float score = data[(4 + c) * num_boxes + i];
+                    if (score > best_score) {
+                        best_score = score;
+                        best_cls   = c;
+                    }
                 }
 
-                det.confidence = conf;
-                detections.push_back(det);
+                if (best_score < static_cast<float>(config_.threshold)) continue;
 
-                std::cout << "[YoloModel] Detections parsed: " << conf << 
-                    " threshold: " << config_.threshold << 
-                    " label: " << det.label << std::endl;
+                // 反-letterbox到原图坐标系（与你原逻辑保持一致）
+                float rx1 = (x1 - prep.pad_x) / prep.scale;
+                float ry1 = (y1 - prep.pad_y) / prep.scale;
+                float rx2 = (x2 - prep.pad_x) / prep.scale;
+                float ry2 = (y2 - prep.pad_y) / prep.scale;
+
+                // 简单裁剪到图像尺寸范围（可选）
+                rx1 = std::max(0.0f, std::min(rx1, static_cast<float>(image.cols - 1)));
+                ry1 = std::max(0.0f, std::min(ry1, static_cast<float>(image.rows - 1)));
+                rx2 = std::max(0.0f, std::min(rx2, static_cast<float>(image.cols - 1)));
+                ry2 = std::max(0.0f, std::min(ry2, static_cast<float>(image.rows - 1)));
+
+                // 丢弃无效框
+                if (rx2 <= rx1 || ry2 <= ry1) continue;
+
+                cands.push_back({best_cls, best_score, rx1, ry1, rx2, ry2});
             }
 
+            // ============ 3. NMS（class-agnostic, IoU = 0.35） ============
+
+            // 计算 IoU 的小函数（x1,y1,x2,y2 格式）
+            auto iou = [](const Cand& a, const Cand& b) {
+                float xx1 = std::max(a.x1, b.x1);
+                float yy1 = std::max(a.y1, b.y1);
+                float xx2 = std::min(a.x2, b.x2);
+                float yy2 = std::min(a.y2, b.y2);
+                float w = std::max(0.0f, xx2 - xx1);
+                float h = std::max(0.0f, yy2 - yy1);
+                float inter = w * h;
+                float areaA = (a.x2 - a.x1) * (a.y2 - a.y1);
+                float areaB = (b.x2 - b.x1) * (b.y2 - b.y1);
+                float uni = areaA + areaB - inter + 1e-6f;
+                return inter / uni;
+            };
+
+            // 置信度从高到低排序
+            std::sort(cands.begin(), cands.end(),
+                    [](const Cand& a, const Cand& b) { return a.score > b.score; });
+
+            const float IOU_THRESH = 0.35f;        // 你的参数
+            const int   TOPK       = 300;          // 可按需调小/调大
+            std::vector<int> keep;
+            keep.reserve(cands.size());
+
+            for (int i = 0; i < (int)cands.size(); ++i) {
+                if ((int)keep.size() >= TOPK) break;
+                bool suppressed = false;
+                for (int j = 0; j < (int)keep.size(); ++j) {
+                    if (iou(cands[i], cands[keep[j]]) > IOU_THRESH) {
+                        suppressed = true;
+                        break;
+                    }
+                }
+                if (!suppressed) keep.push_back(i);
+            }
+
+            // ============ 4. 输出 Detection ============
+
+            detections.reserve(keep.size());
+            for (int idx : keep) {
+                const auto& c = cands[idx];
+                Detection det;
+                det.region.x      = c.x1;
+                det.region.y      = c.y1;
+                det.region.width  = c.x2;  // 注意：你项目里把 width/height 用作 x2/y2（保持与现有渲染一致）
+                det.region.height = c.y2;
+                det.confidence    = c.score;
+
+                // 输出类别名（label=2）
+                if (c.cls >= 0 && c.cls < (int)class_names.size()) {
+                    det.label = class_names[c.cls];
+                } else {
+                    det.label = "class_" + std::to_string(std::max(0, c.cls));
+                }
+
+                detections.push_back(std::move(det));
+            }
             std::cout << "==============================================================\n" << std::endl;
 
         } catch (const Ort::Exception& ex) {
