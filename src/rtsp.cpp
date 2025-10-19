@@ -38,16 +38,15 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
         return {};
     }
 
+    // ---------- COMMAND 拼接修正 ----------
     std::ostringstream command;
-    command << "ffmpeg -nostdin -rtsp_transport tcp -loglevel debug ";
-    if (timeout.count() > 0) {
-        // stimeout expects microseconds
-        command << "-stimeout " << (timeout.count() * 1000) << ' ';
-    }
-    command << "-i '" << buildRtspUrl() << "' ";
-    command << "-vf fps=" << fps << ' ';
-    command << "-vframes " << max_frames << ' ';
-    command << "-vcodec mjpeg -f image2pipe - 2>/dev/null";
+    command
+        << "ffmpeg -nostdin -hide_banner -loglevel error "
+        << "-rtsp_transport tcp "
+        << "-i '" << buildRtspUrl() << "' "
+        << "-an "
+        << "-vf \"select='eq(pict_type\\\\,I)',fps=" << fps << "\" "
+        << "-vcodec mjpeg -q:v 2 -f image2pipe - 2>/dev/null"; 
 
     int exitStatus = 0;
     auto closer = [&exitStatus](FILE* f) {
@@ -65,7 +64,7 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
     frames.reserve(max_frames);
 
     std::vector<std::uint8_t> frameBuffer;
-    frameBuffer.reserve(1024 * 1024);
+    frameBuffer.reserve(1024 * 1024 * 3);
 
     std::array<std::uint8_t, 4096> buffer{};
     std::uint8_t previous = 0;
@@ -79,9 +78,12 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
         if (!capturing && frameBuffer.empty()) {
             return;
         }
-        if (!frameBuffer.empty() && (force || (!frameBuffer.empty() && frameBuffer.size() >= 2 &&
-                                               frameBuffer[frameBuffer.size() - 2] == 0xFF &&
-                                               frameBuffer.back() == 0xD9))) {
+        if (!frameBuffer.empty() &&
+            (force ||
+                (frameBuffer.size() >= 2 &&
+                frameBuffer[frameBuffer.size() - 2] == 0xFF &&
+                frameBuffer.back() == 0xD9))) {
+
             CapturedFrame frame;
             frame.timestamp = static_cast<double>(frameIndex) / fps;
             frame.data = frameBuffer;
@@ -95,15 +97,7 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
 
     while (frameIndex < max_frames) {
         std::size_t bytesRead = std::fread(buffer.data(), 1, buffer.size(), pipe.get());
-        if (bytesRead == 0) {
-            if (std::feof(pipe.get())) {
-                break;
-            }
-            if (std::ferror(pipe.get())) {
-                throw std::runtime_error("Error while reading RTSP frame data");
-            }
-            break;
-        }
+        if (bytesRead == 0) break;
 
         for (std::size_t i = 0; i < bytesRead && frameIndex < max_frames; ++i) {
             std::uint8_t byte = buffer[i];
@@ -122,14 +116,8 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
                     finalizeFrame(false);
                 }
             }
-
             havePrevious = true;
             previous = byte;
-
-            if (capturing && frameBuffer.size() == 1) {
-                // ensure we keep the first byte even when we skip continue above
-                frameBuffer[0] = previous;
-            }
         }
 
         if (enforceTimeout) {
@@ -148,14 +136,9 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
         throw std::runtime_error("RTSP capture produced no frames");
     }
 
-    if (exitStatus != 0) {
-        std::ostringstream error;
-        error << "ffmpeg exited with status " << exitStatus;
-        throw std::runtime_error(error.str());
-    }
-
     return frames;
 }
+
 
 }  // namespace app
 
