@@ -283,7 +283,7 @@ void ProcessingPipeline::add_missing(const std::string &scenario_id) {
         std::cerr << "Scenario " << scenario_id << " not found in configuration map\n";
         return;
     }
-    
+
     try {
         ScenarioDefinition def = store_->load_scenario_file(path_it->config_path);
         if (def.id.empty()) {
@@ -309,8 +309,6 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
     
     const ScenarioConfig* scenarioConfig = findScenario(scenarioId);
 
-    std::cout << "=== process image ===" << std::endl;
-
     if (command.scenario_id.empty()) {
         throw std::runtime_error("Command must define at least one scenario");
     }
@@ -323,6 +321,8 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
         std::cerr << "Skipping inactive scenario: " << scenarioConfig->id << "\n";
         return results;
     }
+
+    std::cout << "=== process image ===" << std::endl;
 
     auto scenario = active_scenarios_.find(scenarioId);
     
