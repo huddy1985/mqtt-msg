@@ -26,5 +26,8 @@
   ],
   "confidence_threshold": 0.7,
   "iou_threshold": 0.5,
-  "labels": ["fire", "default", "smoke"]
+  "labels": [
+    "smoke",
+    "fire"
+  ]
 }
