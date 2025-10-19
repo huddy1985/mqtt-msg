@@ -35,8 +35,8 @@ std::string detectLocalMac();
 
 using namespace cv; 
 
-constexpr int INPUT_WIDTH = 1920;
-constexpr int INPUT_HEIGHT = 1088;
+constexpr int INPUT_WIDTH = 640;
+constexpr int INPUT_HEIGHT = 640;
 
 struct PreprocessInfo {
     std::vector<float> input_tensor;

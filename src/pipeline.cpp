@@ -322,13 +322,12 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
         return results;
     }
 
-    std::cout << "=== process image ===" << std::endl;
-
     auto scenario = active_scenarios_.find(scenarioId);
     
     if (scenario == active_scenarios_.end()) {
         return results;
     }
+    std::cout << "=== process image ===" << std::endl;
 
     auto active_scenario = scenario->second;
     
