@@ -1,0 +1,9 @@
+path: /home/charlies/project/zhongying/droplet/dataset_merged
+train: train/images
+val: valid/images
+test: test/images
+nc: 3
+names:
+- water-leak
+- crack
+- pipeline

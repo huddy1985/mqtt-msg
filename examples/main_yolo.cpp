@@ -1,14 +1,57 @@
+#include <opencv2/opencv.hpp>
+#include <opencv2/dnn.hpp>
+#include <onnxruntime_cxx_api.h>
+#include <algorithm>
 #include <iostream>
-#include <fstream>
 #include <vector>
 #include <string>
 #include <cmath>
 #include <numeric>
-#include <opencv2/opencv.hpp>
-#include <onnxruntime_cxx_api.h>
 #include <yaml-cpp/yaml.h>
 
-// ========== 读取 YAML 中类别名 ==========
+// -------------------- 预处理 --------------------
+struct PreprocessInfo {
+    std::vector<float> input_tensor;
+    float scale;
+    int pad_x, pad_y;
+    cv::Mat letterbox;
+};
+
+PreprocessInfo preprocess_letterbox(const cv::Mat& img, int input_w, int input_h) {
+    int img_w = img.cols;
+    int img_h = img.rows;
+    float scale = std::min((float)input_w / img_w, (float)input_h / img_h);
+    int new_w = static_cast<int>(std::round(img_w * scale));
+    int new_h = static_cast<int>(std::round(img_h * scale));
+
+    cv::Mat resized;
+    cv::resize(img, resized, cv::Size(new_w, new_h), 0, 0, cv::INTER_LINEAR);
+
+    int pad_x = (input_w - new_w) / 2;
+    int pad_y = (input_h - new_h) / 2;
+
+    cv::Mat letterbox(input_h, input_w, img.type(), cv::Scalar(114,114,114));
+    resized.copyTo(letterbox(cv::Rect(pad_x, pad_y, new_w, new_h)));
+
+    cv::Mat float_img;
+    letterbox.convertTo(float_img, CV_32F, 1.0/255.0);
+    // ✅ YOLO/Ultralytics 使用 RGB
+    cv::cvtColor(float_img, float_img, cv::COLOR_BGR2RGB);
+
+    std::vector<cv::Mat> chw(3);
+    cv::split(float_img, chw);
+
+    std::vector<float> input_tensor;
+    input_tensor.reserve(input_w * input_h * 3);
+    for (int c = 0; c < 3; ++c) {
+        const float* begin = reinterpret_cast<const float*>(chw[c].datastart);
+        const float* end   = reinterpret_cast<const float*>(chw[c].dataend);
+        input_tensor.insert(input_tensor.end(), begin, end);
+    }
+    return {input_tensor, scale, pad_x, pad_y, letterbox};
+}
+
+// -------------------- 读取 YAML names --------------------
 std::vector<std::string> loadClassNames(const std::string& yaml_path) {
     std::vector<std::string> names;
     try {
@@ -25,237 +68,206 @@ std::vector<std::string> loadClassNames(const std::string& yaml_path) {
     return names;
 }
 
-// ========== 计算IoU（用于NMS） ==========
-float IoU(const cv::Rect2f& a, const cv::Rect2f& b) {
-    float interArea = (a & b).area();
-    float unionArea = a.area() + b.area() - interArea;
-    return interArea / unionArea;
-}
-
-// ========== 执行NMS ==========
-std::vector<int> NMS(const std::vector<cv::Rect2f>& boxes,
-                     const std::vector<float>& scores,
-                     float iouThreshold = 0.45f) {
-    std::vector<int> indices;
-    std::vector<int> order(boxes.size());
-    std::iota(order.begin(), order.end(), 0);
-    std::sort(order.begin(), order.end(),
-              [&](int i, int j) { return scores[i] > scores[j]; });
-
-    std::vector<bool> suppressed(boxes.size(), false);
-    for (size_t i = 0; i < order.size(); i++) {
-        int idx = order[i];
-        if (suppressed[idx]) continue;
-        indices.push_back(idx);
-        for (size_t j = i + 1; j < order.size(); j++) {
-            int idx2 = order[j];
-            if (IoU(boxes[idx], boxes[idx2]) > iouThreshold)
-                suppressed[idx2] = true;
-        }
-    }
-    return indices;
-}
-
-// ========== YOLOv11 ONNX 模型类 ==========
-class YoloONNX {
-public:
-    YoloONNX(const std::string& model_path)
-        : env_(ORT_LOGGING_LEVEL_WARNING, "yolo"), session_(nullptr) {
-        Ort::SessionOptions opts;
-        opts.SetGraphOptimizationLevel(ORT_ENABLE_EXTENDED);
-        session_ = std::make_unique<Ort::Session>(env_, model_path.c_str(), opts);
-
-        Ort::AllocatorWithDefaultOptions allocator;
-        size_t num_inputs = session_->GetInputCount();
-        for (size_t i = 0; i < num_inputs; i++)
-            input_names_.push_back(session_->GetInputNameAllocated(i, allocator).release());
-        size_t num_outputs = session_->GetOutputCount();
-        for (size_t i = 0; i < num_outputs; i++)
-            output_names_.push_back(session_->GetOutputNameAllocated(i, allocator).release());
-
-        std::cout << "[INFO] Model loaded: " << model_path << std::endl;
-    }
-
-    std::vector<float> infer(const cv::Mat& img, std::vector<int64_t>& output_shape) {
-        // --- 预处理 ---
-        cv::Mat resized;
-        cv::resize(img, resized, cv::Size(640, 640));
-        cv::Mat rgb;
-        cv::cvtColor(resized, rgb, cv::COLOR_BGR2RGB);
-        rgb.convertTo(rgb, CV_32F, 1.0 / 255.0);
-
-        std::vector<float> input_tensor_values(1 * 3 * 640 * 640);
-        int idx = 0;
-        for (int c = 0; c < 3; ++c)
-            for (int y = 0; y < 640; ++y)
-                for (int x = 0; x < 640; ++x)
-                    input_tensor_values[idx++] = rgb.at<cv::Vec3f>(y, x)[c];
-
-        std::array<int64_t, 4> input_shape = {1, 3, 640, 640};
-        Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-        Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-            memory_info, input_tensor_values.data(), input_tensor_values.size(),
-            input_shape.data(), input_shape.size());
-
-        // --- 推理 ---
-        auto output_tensors = session_->Run(
-            Ort::RunOptions{nullptr},
-            input_names_.data(), &input_tensor, 1,
-            output_names_.data(), output_names_.size());
-
-        float* output_data = output_tensors[0].GetTensorMutableData<float>();
-        auto tensor_info = output_tensors[0].GetTensorTypeAndShapeInfo();
-        output_shape = tensor_info.GetShape();
-
-        size_t total_len = 1;
-        for (auto s : output_shape) total_len *= s;
-
-        std::vector<float> output(output_data, output_data + total_len);
-        std::cout << "[INFO] Inference done. Output shape = [";
-        for (auto s : output_shape) std::cout << s << " ";
-        std::cout << "]" << std::endl;
-        return output;
-    }
-
-private:
-    Ort::Env env_;
-    std::unique_ptr<Ort::Session> session_;
-    std::vector<const char*> input_names_;
-    std::vector<const char*> output_names_;
-};
-
-// ========== 主程序 ==========
+// -------------------- 主程序 --------------------
 int main(int argc, char** argv) {
-    if (argc < 4) {
-        std::cerr << "Usage: ./main <model.onnx> <data.yaml> <image>" << std::endl;
+    if (argc != 4) {
+        std::cerr << "Usage: " << argv[0] << " <model.onnx> <data.yaml> <image>\n";
         return 1;
     }
-
     std::string model_path = argv[1];
-    std::string yaml_path = argv[2];
+    std::string yaml_path  = argv[2];
     std::string image_path = argv[3];
 
-    auto class_names = loadClassNames(yaml_path);
-    if (class_names.empty()) class_names.push_back("unknown");
-    std::cout << "[INFO] Loaded " << class_names.size() << " class names." << std::endl;
-
     cv::Mat img = cv::imread(image_path);
-    if (img.empty()) {
-        std::cerr << "[ERROR] Cannot read image: " << image_path << std::endl;
+    if (img.empty()) { std::cerr << "Failed to load image\n"; return 1; }
+    int orig_w = img.cols, orig_h = img.rows;
+
+    auto class_names = loadClassNames(yaml_path);
+    if (class_names.empty()) std::cerr << "[WARN] Cannot parse class names from yaml. Use empty names.\n";
+
+    // ONNX Runtime
+    Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "yo");
+    Ort::SessionOptions so; so.SetGraphOptimizationLevel(ORT_ENABLE_EXTENDED);
+    Ort::Session session(env, model_path.c_str(), so);
+
+    // 输入尺寸（假定 NCHW）
+    Ort::AllocatorWithDefaultOptions allocator;
+    auto input_name  = session.GetInputNameAllocated(0, allocator);
+    auto output_name = session.GetOutputNameAllocated(0, allocator);
+
+
+    int C=3, H=1280, W=1280;  // 默认兜底
+    
+    try {
+        Ort::TypeInfo type_info = session.GetInputTypeInfo(0);
+        auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
+
+        auto in_shape = tensor_info.GetShape(); // 可能抛异常或返回奇怪的 count
+        if (in_shape.size() == 4 ) {
+            auto fix = [](int64_t d, int def) {
+                    return d>0 ? (int)d : def; 
+                };
+            if (in_shape[1]==3 || in_shape[1]==1) { C=fix(in_shape[1],3); H=fix(in_shape[2],1280); W=fix(in_shape[3],1280); }
+            else { C=fix(in_shape[3],3); H=fix(in_shape[1],1280); W=fix(in_shape[2],1280); }
+        } else {
+            std::cerr << "[WARN] input shape rank != 4, fallback to 1x3x1280x1280\n";
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "[WARN] GetInput shape failed: " << e.what()
+                << "\n       fallback to 1x3x1280x1280\n";
+    }
+
+    // 预处理（letterbox 到 W×H）
+    PreprocessInfo lb = preprocess_letterbox(img, W, H);
+
+    // 构造输入 tensor
+    Ort::MemoryInfo mem_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeDefault);
+    std::vector<int64_t> input_shape = {1, C, H, W};
+    Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+        mem_info, lb.input_tensor.data(), lb.input_tensor.size(), input_shape.data(), input_shape.size()
+    );
+
+    const char* input_names[]  = { input_name.get() };
+    const char* output_names[] = { output_name.get() };
+
+    // 推理
+    auto outs = session.Run(Ort::RunOptions{nullptr}, input_names, &input_tensor, 1, output_names, 1);
+    if (outs.empty()) { std::cerr << "No output\n"; return 1; }
+
+    // 输出 shape（支持 [1,7,N] 或 [1,N,7]）
+    auto& out = outs.front();
+    auto out_info  = out.GetTensorTypeAndShapeInfo();
+    auto out_shape = out_info.GetShape();
+    if (out_shape.size()!=3) {
+        std::cerr << "[ERROR] Unexpected output dims (expect 3). Got: ";
+        for (auto d: out_shape) std::cerr << d << " ";
+        std::cerr << "\n";
         return 1;
     }
 
-    int orig_w = img.cols;
-    int orig_h = img.rows;
+    const float* out_ptr = out.GetTensorData<float>();
+    int dim1 = (int)out_shape[1];
+    int dim2 = (int)out_shape[2];
 
-    YoloONNX yolo(model_path);
-    std::vector<int64_t> output_shape;
-    auto output = yolo.infer(img, output_shape);
+    bool attr_first = (dim1 == 7); // [1,7,N]
+    int N = attr_first ? dim2 : dim1;
+    if (N <= 0) { std::cerr << "[ERROR] N<=0\n"; return 1; }
 
-    // ---------- 维度自动识别 ----------
-    int64_t dim1 = output_shape[1];
-    int64_t dim2 = output_shape[2];
-    bool transposed = false;
-    int num_det = 0, num_attrs = 0;
+    // 展平到 [N,7]
+    std::vector<float> preds((size_t)N * 7);
+    if (attr_first) {
+        // [1,7,N] -> [N,7]
+        for (int a=0; a<7; ++a) {
+            const float* src = out_ptr + (size_t)a * N;
+            float* dst_col = preds.data() + a;
 
-    if (dim1 > dim2) {
-        num_det = dim1;
-        num_attrs = dim2;
-    } else {
-        num_det = dim2;
-        num_attrs = dim1;
-        transposed = true;
-    }
-
-    std::vector<float> detections(num_det * num_attrs);
-    if (transposed) {
-        for (int i = 0; i < num_attrs; i++)
-            for (int j = 0; j < num_det; j++)
-                detections[j * num_attrs + i] = output[i * num_det + j];
-    } else {
-        detections = output;
-    }
-
-    // ---------- sigmoid 激活 ----------
-    auto sigmoid = [](float x) { return 1.0f / (1.0f + std::exp(-x)); };
-    for (float &v : detections) v = sigmoid(v);
-
-    int num_classes = std::max(0, num_attrs - 5);
-    std::cout << "[INFO] Detected boxes: " << num_det
-              << ", num_classes=" << num_classes << std::endl;
-
-    std::vector<cv::Rect2f> boxes;
-    std::vector<float> scores;
-    std::vector<int> class_ids;
-
-    for (int i = 0; i < num_det; i++) {
-        float cx = detections[i * num_attrs + 0];
-        float cy = detections[i * num_attrs + 1];
-        float w  = detections[i * num_attrs + 2];
-        float h  = detections[i * num_attrs + 3];
-        float conf = detections[i * num_attrs + 4];
-
-        int cls_id = 0;
-        if (num_classes > 0) {
-            float obj_conf = conf;
-            float max_prob = -1;
-            for (int c = 0; c < num_classes; c++) {
-                float prob = detections[i * num_attrs + 5 + c];
-                if (prob > max_prob) {
-                    max_prob = prob;
-                    cls_id = c;
-                }
-            }
-            conf = obj_conf * max_prob;
+            for (int i=0; i<N; ++i) 
+                dst_col[i*7] = src[i];
         }
-
-        if (conf > 0.5f) {
-            // ===== 修复：相对坐标转像素坐标 =====
-            float x1 = (cx - w / 2.0f) * 640.0f;
-            float y1 = (cy - h / 2.0f) * 640.0f;
-            float x2 = (cx + w / 2.0f) * 640.0f;
-            float y2 = (cy + h / 2.0f) * 640.0f;
-
-            // 映射回原图尺寸
-            float scale_x = static_cast<float>(orig_w) / 640.0f;
-            float scale_y = static_cast<float>(orig_h) / 640.0f;
-            x1 *= scale_x; x2 *= scale_x;
-            y1 *= scale_y; y2 *= scale_y;
-
-            x1 = std::clamp(x1, 0.0f, (float)orig_w - 1);
-            y1 = std::clamp(y1, 0.0f, (float)orig_h - 1);
-            x2 = std::clamp(x2, 0.0f, (float)orig_w - 1);
-            y2 = std::clamp(y2, 0.0f, (float)orig_h - 1);
-
-            boxes.emplace_back(x1, y1, x2 - x1, y2 - y1);
-            scores.push_back(conf);
-            class_ids.push_back(cls_id);
-        }
+    } else {
+        // [1,N,7] 直接拷贝
+        std::memcpy(preds.data(), out_ptr, sizeof(float) * (size_t)N * 7);
     }
 
-    auto keep = NMS(boxes, scores, 0.45f);
+    // =============== 评分 + TopK 预筛（避免全量 136000 进入 NMS） ===============
+    constexpr int TOPK = 2000; // 可按需调整
+    std::vector<float> scores_all; scores_all.reserve(N);
+    for (int i=0; i<N; ++i) {
+        float f4 = preds[i*7 + 4];     // ✅ YOLO11 导出已融合：f4 就是最终 conf
+        // float f6 = preds[i*7 + 6];  // 常为占位，不参与评分
+        scores_all.push_back(f4);
+    }
+    std::vector<int> order(N); std::iota(order.begin(), order.end(), 0);
+    int K = std::min(TOPK, N);
+    std::nth_element(order.begin(), order.begin()+K, order.end(),
+                     [&](int a, int b){ return scores_all[a] > scores_all[b]; });
+    order.resize(K);
+    std::sort(order.begin(), order.end(),
+              [&](int a, int b){ return scores_all[a] > scores_all[b]; });
 
+    // =============== 过滤 + 逆 letterbox 映射回原图坐标 ===============
+    const float conf_thres = 0.10f;   // 你的指定阈值
+    const float iou_thres  = 0.45f;
+
+    std::vector<cv::Rect> boxes;  boxes.reserve(K);
+    std::vector<float>    scores; scores.reserve(K);
+    std::vector<int>      class_ids; class_ids.reserve(K);
+
+    int passed = 0;
+    for (int id : order) {
+        float conf = scores_all[id];
+        if (conf < conf_thres) continue;
+
+        float cx = preds[id*7 + 0];
+        float cy = preds[id*7 + 1];
+        float w  = preds[id*7 + 2];
+        float h  = preds[id*7 + 3];
+
+        float x1m = cx - w * 0.5f;
+        float y1m = cy - h * 0.5f;
+        float x2m = cx + w * 0.5f;
+        float y2m = cy + h * 0.5f;
+
+        float f5  = preds[id*7 + 5];  // ✅ class_id
+
+        // 逆 letterbox
+        float x1 = (x1m - lb.pad_x) / lb.scale;
+        float y1 = (y1m - lb.pad_y) / lb.scale;
+        float x2 = (x2m - lb.pad_x) / lb.scale;
+        float y2 = (y2m - lb.pad_y) / lb.scale;
+
+        x1 = std::max(0.f, std::min(x1, (float)orig_w - 1.f));
+        y1 = std::max(0.f, std::min(y1, (float)orig_h - 1.f));
+        x2 = std::max(0.f, std::min(x2, (float)orig_w - 1.f));
+        y2 = std::max(0.f, std::min(y2, (float)orig_h - 1.f));
+
+        if (x2 <= x1 + 1.f || y2 <= y1 + 1.f) continue;
+
+        std::cout << "conf: " << conf << std::endl;
+        boxes.emplace_back(
+            (int)std::round(x1),
+            (int)std::round(y1),
+            (int)std::round(x2 - x1),
+            (int)std::round(y2 - y1)
+        );
+        scores.emplace_back(conf);
+
+        int cid = (int)std::round(f5);
+        if (!class_names.empty()) {
+            cid = std::max(0, std::min(cid, (int)class_names.size()-1));
+        }
+        class_ids.emplace_back(cid);
+        ++passed;
+    }
+    std::cout << "[INFO] candidates after conf: " << passed << " / " << N
+              << " (topK=" << K << ")\n";
+
+    // =============== NMS ===============
+    std::vector<int> keep;
+    if (!boxes.empty())
+        cv::dnn::NMSBoxes(boxes, scores, conf_thres, iou_thres, keep);
+
+    // =============== 绘制 ===============
+    cv::Mat vis = img.clone();
     for (int idx : keep) {
-        cv::Rect2f box = boxes[idx];
-        float conf = scores[idx];
-        int cls_id = class_ids[idx];
-        std::string label = (cls_id >= 0 && cls_id < (int)class_names.size())
-                                ? class_names[cls_id]
-                                : "unknown";
+        const auto& r = boxes[idx];
+        float sc = scores[idx];
+        int cid  = class_ids[idx];
+        cv::rectangle(vis, r, cv::Scalar(0,255,0), 2);
 
-        std::cout << "Detected: " << label
-                  << " conf=" << conf
-                  << " box=(" << box.x << "," << box.y << ","
-                  << box.x + box.width << "," << box.y + box.height << ")\n";
-
-        cv::rectangle(img, box, {0,255,0}, 2);
-        cv::putText(img, label + " " + std::to_string(conf),
-                    cv::Point((int)box.x, (int)box.y - 5),
-                    cv::FONT_HERSHEY_SIMPLEX, 0.6, {0,255,0}, 2);
+        std::string name = (cid>=0 && cid<(int)class_names.size())
+            ? class_names[cid] : ("cls_" + std::to_string(cid));
+        char buf[128]; std::snprintf(buf, sizeof(buf), "%s %.2f", name.c_str(), sc);
+        int base=0; auto t = cv::getTextSize(buf, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &base);
+        cv::rectangle(vis, cv::Rect(cv::Point(r.x, std::max(0, r.y - t.height - 6)),
+                                    cv::Size(t.width+6, t.height+6)), cv::Scalar(0,255,0), cv::FILLED);
+        cv::putText(vis, buf, cv::Point(r.x+3, r.y-3), cv::FONT_HERSHEY_SIMPLEX, 0.5,
+                    cv::Scalar(0,0,0), 1, cv::LINE_AA);
     }
 
-    cv::imwrite("result.jpg", img);
-    std::cout << "[INFO] Saved visualization to result.jpg" << std::endl;
+    cv::imwrite("result.jpg", vis);
+    std::cout << "[INFO] Kept boxes: " << keep.size() << "\n";
+    std::cout << "[INFO] Saved to result.jpg\n";
     return 0;
 }
 

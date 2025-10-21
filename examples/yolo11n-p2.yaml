@@ -1,0 +1,47 @@
+# YOLO11n with P2 enabled for small-object detection
+
+nc: 3  # number of classes
+depth_multiple: 0.33
+width_multiple: 0.25
+
+backbone:
+  # [from, number, module, args]
+  [[-1, 1, Conv, [64, 3, 2]],     # 0-P1/2
+   [-1, 1, Conv, [64, 3, 1]],
+   [-1, 1, Conv, [128, 3, 2]],    # 2-P2/4  ✅ (THIS is small-object layer anchor)
+   [-1, 3, C2f, [128, True]],
+   [-1, 1, Conv, [256, 3, 2]],    # 4-P3/8
+   [-1, 6, C2f, [256, True]],
+   [-1, 1, Conv, [512, 3, 2]],    # 6-P4/16
+   [-1, 6, C2f, [512, True]],
+   [-1, 1, Conv, [1024, 3, 2]],   # 8-P5/32
+   [-1, 3, C2f, [1024, True]],
+   [-1, 1, SPPF, [1024, 5]]]
+
+head:
+  [[-1, 1, Conv, [512, 1, 1]],    # 11
+   [-1, 1, nn.Upsample, [None, 2, 'nearest']],  # 12
+   [6, 1, Conv, [512, 1, 1]],     # 13 (P4) merge
+   [[-1, 12], 1, Concat, [1]],
+   [-1, 3, C2f, [512, False]],    # 15
+   [-1, 1, nn.Upsample, [None, 2, 'nearest']],  # 16
+   [4, 1, Conv, [256, 1, 1]],     # 17 (P3)
+   [[-1, 16], 1, Concat, [1]],
+   [-1, 3, C2f, [256, False]],    # 19
+   [-1, 1, nn.Upsample, [None, 2, 'nearest']],  # 20
+   [2, 1, Conv, [128, 1, 1]],     # 21 (P2)
+   [[-1, 20], 1, Concat, [1]],
+   [-1, 3, C2f, [128, False]],    # 23 <- new P2 detection input
+   [23, 1, Conv, [128, 3, 2]], # 24 P2->P3
+   [[19, 24], 1, Concat, [1]],
+   [-1, 3, C2f, [256, False]],    # 26
+   [26, 1, Conv, [256, 3, 2]], # 27 P3->P4
+   [[15, 27], 1, Concat, [1]],
+   [-1, 3, C2f, [512, False]],    # 29
+   [29, 1, Conv, [512, 3, 2]], # 30 P4->P5
+   [[10, 30], 1, Concat, [1]],
+   [-1, 3, C2f, [1024, False]],   # 32
+
+   # Detect head
+   [[23, 19, 15, 32], 1, Detect, [nc]]]
+
