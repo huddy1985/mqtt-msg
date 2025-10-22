@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <shared_mutex>
 
 #include "app/command.hpp"
 #include "app/config.hpp"
@@ -49,6 +50,7 @@ private:
     AppConfig config_;
     RtspFrameGrabber frame_grabber_;
     ConfigStore *store_{nullptr};
+    mutable std::shared_mutex scenarios_mutex_;
     std::map<std::string, std::shared_ptr<Scenario>> active_scenarios_;
 };
 
