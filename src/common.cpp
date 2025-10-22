@@ -146,7 +146,7 @@ PreprocessInfo preprocess_letterbox(const cv::Mat& img, int input_w, int input_h
     cv::split(float_img, chw);
 
     std::vector<float> input_tensor;
-    input_tensor.reserve(input_w * input_h * 3);  // 预留足够空间，提高效率
+    input_tensor.reserve(input_w * input_h * 3);
     for (int c = 0; c < 3; ++c) {
         input_tensor.insert(input_tensor.end(),
                             (float*)chw[c].datastart,
