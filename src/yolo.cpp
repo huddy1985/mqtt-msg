@@ -148,6 +148,12 @@ bool YoloModel::load()
                 Ort::TypeInfo type_info = impl_->session->GetInputTypeInfo(0);
                 auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
                 impl_->input_shape = tensor_info.GetShape();
+
+                #ifdef _DEBUG_
+                std::cout << "input batch: " << impl_->input_shape[0] << ", channel: " << impl_->input_shape[1] << std::endl;
+                std::cout << impl_->input_shape[2] << "*" << impl_->input_shape[3] << std::endl;
+                #endif
+
                 for (auto& dim : impl_->input_shape) {
                     if (dim <= 0) {
                         dim = 1;
@@ -209,6 +215,9 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
 
     if (impl_ && impl_->session) {
         try {
+            const int real_width = impl_->input_shape[2];
+            const int real_height = impl_->input_shape[3];
+
             // ============ 1. 构造输入张量 ============
             cv::Mat encoded(1, frame.data.size(), CV_8UC1, const_cast<uint8_t*>(frame.data.data()));
             cv::Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR);
@@ -221,12 +230,13 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
             // Region rects = config_.detection_regions;
 
             #ifdef _DEBUG_
-
+                std::cout << "input batch: " << impl_->input_shape[0] << ", channel: " << impl_->input_shape[1] << std::endl;
+                std::cout << impl_->input_shape[2] << "*" << impl_->input_shape[3] << std::endl;
             #endif
 
-            auto prep = preprocess_letterbox(image, INPUT_WIDTH, INPUT_HEIGHT);
+            auto prep = preprocess_letterbox(image, real_width, real_height);
 
-            std::array<int64_t, 4> input_shape{1, 3, INPUT_HEIGHT, INPUT_WIDTH};
+            std::array<int64_t, 4> input_shape{1, 3, real_height, real_width};
 
             Ort::MemoryInfo mem_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeCPU);
             Ort::Value input_tensor_val = Ort::Value::CreateTensor<float>(
@@ -264,7 +274,9 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
 
             const int num_attrs   = static_cast<int>(shape[1]); // 5/6/7/...
             const int num_boxes   = static_cast<int>(shape[2]);
+
             const int num_classes = num_attrs - 4;
+
             if (num_classes <= 0) {
                 std::cerr << "[YoloModel] num_classes <= 0\n";
                 return detections;
@@ -294,6 +306,11 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
                 float y1 = data[1 * num_boxes + i];
                 float x2 = data[2 * num_boxes + i];
                 float y2 = data[3 * num_boxes + i];
+
+                x1 = x1 - x2 * 0.5f;
+                y1 = y1 - y2 * 0.5f;
+                x2 = x1 + x2 * 0.5f;
+                y2 = y1 + y2 * 0.5f;
 
                 // 遍历类别，取最高分及其类别ID（ONNX里已含 Softmax/Sigmoid，不要重复做）
                 int   best_cls   = -1;
@@ -327,7 +344,6 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
             }
 
             // ============ 3. NMS（class-agnostic, IoU = 0.35） ============
-
             // 计算 IoU 的小函数（x1,y1,x2,y2 格式）
             auto iou = [](const Cand& a, const Cand& b) {
                 float xx1 = std::max(a.x1, b.x1);
@@ -365,27 +381,57 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
             }
 
             // ============ 4. 输出 Detection ============
-
+            cv::Mat vis = image.clone();
             detections.reserve(keep.size());
             for (int idx : keep) {
                 const auto& c = cands[idx];
                 Detection det;
-                det.region.x      = c.x1;
-                det.region.y      = c.y1;
-                det.region.width  = c.x2;  // 注意：你项目里把 width/height 用作 x2/y2（保持与现有渲染一致）
-                det.region.height = c.y2;
+                det.region.x      = static_cast<int>(c.x1);
+                det.region.y      = static_cast<int>(c.y1);
+                det.region.width  = static_cast<int>(c.x2);
+                det.region.height = static_cast<int>(c.y2);
                 det.confidence    = c.score;
 
-                // 输出类别名（label=2）
                 if (c.cls >= 0 && c.cls < (int)class_names.size()) {
                     det.label = class_names[c.cls];
                 } else {
                     det.label = "class_" + std::to_string(std::max(0, c.cls));
                 }
+                std::cout << "label: " << det.label << std::endl;
+
+                char buf[128]; 
+                std::snprintf(buf, sizeof(buf), "%s %.2f", det.label.c_str(), c.score);
+                
+                int base=0; 
+                auto t = cv::getTextSize(buf, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &base);
+                
+                cv::rectangle(
+                    vis, 
+                    cv::Rect(cv::Point(det.region.x, std::max(0, det.region.y - t.height - 6)),
+                            cv::Size(t.width + 6, t.height + 6)),
+                    cv::Scalar(0, 255, 0),
+                    2
+                );
+
+                cv::putText(vis, buf, cv::Point(det.region.x + 3, det.region.y - 3), cv::FONT_HERSHEY_SIMPLEX, 0.5,
+                            cv::Scalar(0,0,0), 1, cv::LINE_AA);
 
                 detections.push_back(std::move(det));
             }
-            std::cout << "==============================================================\n" << std::endl;
+
+            #ifdef _DEBUG_
+                // 构造文件名：frame_xxx.jpg
+                std::ostringstream oss;
+                oss << "/tmp/debug_frame_" << frame.timestamp << ".jpg";
+                std::string debug_filename = oss.str();
+
+                // 写入
+                cv::imwrite(debug_filename, vis);
+
+                std::cout << "[DEBUG] Saved debug frame: " << debug_filename
+                        << "  (" << vis.cols << "x" << vis.rows << ")" << std::endl;
+                
+            #endif
 
         } catch (const Ort::Exception& ex) {
             std::cerr << "[YoloModel] Inference failed: " << ex.what() << std::endl;
@@ -394,6 +440,7 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
     }
 
     std::cout << "[YoloModel] Inference completed. Detections: " << detections.size() << std::endl;
+    std::cout << "==============================================================\n" << std::endl;
     return detections;
 }
 
