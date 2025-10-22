@@ -42,9 +42,7 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
     std::ostringstream command;
     command
         << "ffmpeg -nostdin -hide_banner -loglevel error "
-        << "-fflags nobuffer "           // ✅ 不积压缓存
-        << "-rtbufsize 50M "             // ✅ 本地缓冲更大，不回压服务器
-        << "-rtsp_transport tcp "
+        << "-rtsp_transport udp "
         << "-i '" << buildRtspUrl() << "' "
         << "-an "
         << "-vf \"select='eq(pict_type\\\\,I)',fps=" << fps << "\" "
