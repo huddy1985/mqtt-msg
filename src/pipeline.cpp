@@ -401,6 +401,7 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
         } else if (active_scenario->model_type() == "yolo") {
             const CapturedFrame* frameData = (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
             CapturedFrame synthetic;
+            
             if (!frameData) {
                 synthetic.timestamp = frame.timestamp;
                 synthetic.format = "synthetic";
