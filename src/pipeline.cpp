@@ -171,7 +171,8 @@ const ScenarioConfig* ProcessingPipeline::findScenario(const std::string& scenar
     return &config_.scenarios[index];
 }
 
-/* void ProcessingPipeline::persistActiveScenarios() const {
+/* 
+void ProcessingPipeline::persistActiveScenarios() const {
     if (config_.source_path.empty()) {
         return;
     }
@@ -218,9 +219,11 @@ const ScenarioConfig* ProcessingPipeline::findScenario(const std::string& scenar
     } catch (const std::exception& ex) {
         std::cerr << "Failed to persist scenario activation state: " << ex.what() << "\n";
     }
-} */
+} 
+*/
 
-/* void ProcessingPipeline::setActiveScenarios(const std::vector<std::string>& scenario_ids) {
+/* 
+void ProcessingPipeline::setActiveScenarios(const std::vector<std::string>& scenario_ids) {
     std::vector<bool> desired(config_.scenarios.size(), false);
     for (const auto& id : scenario_ids) {
         auto it = config_.scenario_lookup.find(id);
@@ -241,10 +244,13 @@ const ScenarioConfig* ProcessingPipeline::findScenario(const std::string& scenar
     if (changed) {
         persistActiveScenarios();
     }
-} */
+}
+*/
 
 void ProcessingPipeline::remove_inactive(const std::string &scenario_id) {
     std::vector<std::string> to_remove;
+
+    std::unique_lock lock(scenarios_mutex_);
 
     for (const auto &kv : active_scenarios_) {
         if (kv.first == scenario_id) {
@@ -262,6 +268,8 @@ void ProcessingPipeline::remove_inactive(const std::string &scenario_id) {
 }
 
 void ProcessingPipeline::add_missing(const std::string &scenario_id) {
+    std::unique_lock lock(scenarios_mutex_);
+    
     if (active_scenarios_.find(scenario_id) != active_scenarios_.end()) {
         return;
     }
@@ -401,7 +409,7 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
         } else if (active_scenario->model_type() == "yolo") {
             const CapturedFrame* frameData = (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
             CapturedFrame synthetic;
-            
+
             if (!frameData) {
                 synthetic.timestamp = frame.timestamp;
                 synthetic.format = "synthetic";

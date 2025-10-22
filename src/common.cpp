@@ -137,8 +137,8 @@ PreprocessInfo preprocess_letterbox(const cv::Mat& img, int input_w, int input_h
     cv::resize(img, resized, cv::Size(new_w, new_h));
 
     int pad_x = (input_w - new_w) / 2;
-    int pad_y = (input_h - new_h) / 2;
-    
+    int pad_y = (input_h - new_h) / 2;                                                                                                                  
+
     cv::Mat letterbox(input_h, input_w, img.type(), cv::Scalar(114, 114, 114));
     resized.copyTo(letterbox(cv::Rect(pad_x, pad_y, new_w, new_h)));
 
