@@ -257,8 +257,10 @@ int main(int argc, char** argv) {
 
         std::string name = (cid>=0 && cid<(int)class_names.size())
             ? class_names[cid] : ("cls_" + std::to_string(cid));
+        
         char buf[128]; std::snprintf(buf, sizeof(buf), "%s %.2f", name.c_str(), sc);
         int base=0; auto t = cv::getTextSize(buf, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &base);
+        
         cv::rectangle(vis, cv::Rect(cv::Point(r.x, std::max(0, r.y - t.height - 6)),
                                     cv::Size(t.width+6, t.height+6)), cv::Scalar(0,255,0), cv::FILLED);
         cv::putText(vis, buf, cv::Point(r.x+3, r.y-3), cv::FONT_HERSHEY_SIMPLEX, 0.5,
