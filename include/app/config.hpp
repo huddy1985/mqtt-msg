@@ -66,6 +66,7 @@ struct ScenarioDefinition {
 };
 
 struct AppConfig {
+    std::string version;
     std::string source_path;
     MqttConfig mqtt;
     RtspConfig rtsp;
