@@ -205,7 +205,6 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
         std::cerr << "[YoloModel] Warning: model not loaded.\n";
         return detections;
     }
-
     if (frame.data.empty()) {
         std::cerr << "[YoloModel] Warning: empty frame data.\n";
         return detections;
@@ -215,43 +214,40 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
 
     if (impl_ && impl_->session) {
         try {
-            const int real_width = impl_->input_shape[2];
-            const int real_height = impl_->input_shape[3];
+            // 输入 shape: [N, C, H, W]
+            const int real_height = static_cast<int>(impl_->input_shape[2]); // H
+            const int real_width  = static_cast<int>(impl_->input_shape[3]); // W
 
             // ============ 1. 构造输入张量 ============
-            cv::Mat encoded(1, frame.data.size(), CV_8UC1, const_cast<uint8_t*>(frame.data.data()));
-            cv::Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR);
-
+            cv::Mat encoded(1, static_cast<int>(frame.data.size()), CV_8UC1,
+                            const_cast<uint8_t*>(frame.data.data()));
+            cv::Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR); // BGR
             if (image.empty()) {
                 std::cerr << "Failed to decode image" << std::endl;
                 return detections;
             }
 
-            // Region rects = config_.detection_regions;
-
             #ifdef _DEBUG_
-                std::cout << "input batch: " << impl_->input_shape[0] << ", channel: " << impl_->input_shape[1] << std::endl;
-                std::cout << impl_->input_shape[2] << "*" << impl_->input_shape[3] << std::endl;
+            std::cout << "input batch: " << impl_->input_shape[0]
+                      << ", channel: "   << impl_->input_shape[1] << std::endl;
+            std::cout << real_height << "x" << real_width << std::endl;
             #endif
 
-            auto prep = preprocess_letterbox(image, real_width, real_height);
+            // 预处理注意参数顺序: (input_w, input_h)
+            auto prep = preprocess_letterbox(image, /*input_w=*/real_width, /*input_h=*/real_height);
 
             std::array<int64_t, 4> input_shape{1, 3, real_height, real_width};
-
             Ort::MemoryInfo mem_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeCPU);
             Ort::Value input_tensor_val = Ort::Value::CreateTensor<float>(
                 mem_info, prep.input_tensor.data(), prep.input_tensor.size(),
                 input_shape.data(), input_shape.size());
-            
-            std::cout << std::string(impl_->input_name_ptrs[0]) << " " << std::string(impl_->output_name_ptrs[0]) << std::endl;
 
             // ============ 2. 推理 ============
-            auto outputs = impl_->session->Run(Ort::RunOptions{},
-                                            impl_->input_name_ptrs.data(),
-                                            &input_tensor_val,
-                                            1,
-                                            impl_->output_name_ptrs.data(),
-                                            impl_->output_name_ptrs.size());
+            auto outputs = impl_->session->Run(
+                Ort::RunOptions{},
+                impl_->input_name_ptrs.data(), &input_tensor_val, 1,
+                impl_->output_name_ptrs.data(), impl_->output_name_ptrs.size()
+            );
 
             if (outputs.empty() || !outputs.front().IsTensor()) {
                 std::cerr << "[YoloModel] Invalid ONNX output.\n";
@@ -260,91 +256,91 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
 
             auto& output = outputs.front();
             auto info = output.GetTensorTypeAndShapeInfo();
-            std::vector<int64_t> shape = info.GetShape();
-            const float* data = output.GetTensorData<float>();
-
-            // 自适配 YOLO 输出 [1, C, N]，其中 C = 4 + num_classes
+            std::vector<int64_t> shape = info.GetShape(); // 期望 [1, C, N]
             if (shape.size() != 3 || shape[0] != 1) {
                 std::cerr << "[YoloModel] Unexpected output shape: ["
-                        << (shape.size() > 0 ? std::to_string(shape[0]) : "?") << ","
-                        << (shape.size() > 1 ? std::to_string(shape[1]) : "?") << ","
-                        << (shape.size() > 2 ? std::to_string(shape[2]) : "?") << "]\n";
+                          << (shape.size() > 0 ? std::to_string(shape[0]) : "?") << ","
+                          << (shape.size() > 1 ? std::to_string(shape[1]) : "?") << ","
+                          << (shape.size() > 2 ? std::to_string(shape[2]) : "?") << "]\n";
                 return detections;
             }
 
-            const int num_attrs   = static_cast<int>(shape[1]); // 5/6/7/...
-            const int num_boxes   = static_cast<int>(shape[2]);
+            // --- 关键：固定按 [1, C, N] 读 ---
+            const int C = static_cast<int>(shape[1]); // 7
+            const int N = static_cast<int>(shape[2]); // 8400 或 136000
+            const float* data = output.GetTensorData<float>();
 
-            const int num_classes = num_attrs - 4;
+            auto get_at = [&](int attr_idx, int i_box)->float {
+                // 严格使用 [1, C, N] 布局
+                return data[attr_idx * N + i_box];
+            };
 
-            if (num_classes <= 0) {
-                std::cerr << "[YoloModel] num_classes <= 0\n";
-                return detections;
-            }
+            // ============ 3. 明确参数（基于“之前能识别”的设定） ============
+            // -> 无 objectness: C = 4 + num_classes
+            const bool has_obj   = false;         // *** 固定为无 obj ***
+            const int  offset_cls = 4;
+            const int  num_classes = C - 4;       // 7 - 4 = 3
 
-            // 预备：类别名映射（label=2 要求输出真实类别名）
-            // 如果配置里没有提供类别名，则回退为 "class_0/1/..."
+            // 类别名动态：匹配就用配置，否则回退 class_i
             std::vector<std::string> class_names;
-            if (!config_.labels.empty() && static_cast<int>(config_.labels.size()) == num_classes) {
+            if ((int)config_.labels.size() == num_classes) {
                 class_names = config_.labels;
             } else {
                 class_names.resize(num_classes);
-                for (int c = 0; c < num_classes; ++c) class_names[c] = "class_" + std::to_string(c);
+                for (int c = 0; c < num_classes; ++c)
+                    class_names[c] = "class_" + std::to_string(c);
             }
 
-            // 先收集所有通过阈值的候选框（class-agnostic，取每个框的best class）
-            struct Cand {
-                int   cls;
-                float score;
-                float x1, y1, x2, y2;  // 注意：你当前代码把 region.width/height 用作 x2/y2
-            };
-            std::vector<Cand> cands;
-            cands.reserve(std::min(num_boxes, 20000)); // 防御性预留
+            struct Cand { int cls; float score; float x1,y1,x2,y2; };
+            std::vector<Cand> cands; cands.reserve(std::min(N, 20000));
 
-            for (int i = 0; i < num_boxes; ++i) {
-                float x1 = data[0 * num_boxes + i];
-                float y1 = data[1 * num_boxes + i];
-                float x2 = data[2 * num_boxes + i];
-                float y2 = data[3 * num_boxes + i];
+            // ============ 4. 解析框（固定 cxcywh → xyxy） ============
+            for (int i = 0; i < N; ++i) {
+                float cx = get_at(0, i);
+                float cy = get_at(1, i);
+                float w  = get_at(2, i);
+                float h  = get_at(3, i);
 
-                x1 = x1 - x2 * 0.5f;
-                y1 = y1 - y2 * 0.5f;
-                x2 = x1 + x2 * 0.5f;
-                y2 = y1 + y2 * 0.5f;
+                float x1 = cx - w * 0.5f;
+                float y1 = cy - h * 0.5f;
+                float x2 = cx + w * 0.5f;
+                float y2 = cy + h * 0.5f;
 
-                // 遍历类别，取最高分及其类别ID（ONNX里已含 Softmax/Sigmoid，不要重复做）
-                int   best_cls   = -1;
-                float best_score = -1.0f;
+                // 分数（无 obj）：直接取类别概率最大值
+                int   best_cls = -1;
+                float best_prob = -1.0f;
                 for (int c = 0; c < num_classes; ++c) {
-                    float score = data[(4 + c) * num_boxes + i];
-                    if (score > best_score) {
-                        best_score = score;
-                        best_cls   = c;
-                    }
+                    float p = get_at(offset_cls + c, i); // 已含 Sigmoid/Softmax 概率
+                    if (p > best_prob) { best_prob = p; best_cls = c; }
                 }
+                
+                float best_score = best_prob; // **不要乘 obj**
 
-                if (best_score < static_cast<float>(config_.threshold)) continue;
+                #ifdef DEBUG_
+                std::cout << "prob: " << best_prob << "; thresh: " << static_cast<float>(config_.threshold) << std::endl;
+                #endif
 
-                // 反-letterbox到原图坐标系（与你原逻辑保持一致）
+                if (best_score < static_cast<float>(config_.threshold))
+                    continue;
+
+                // 反 letterbox
                 float rx1 = (x1 - prep.pad_x) / prep.scale;
                 float ry1 = (y1 - prep.pad_y) / prep.scale;
                 float rx2 = (x2 - prep.pad_x) / prep.scale;
                 float ry2 = (y2 - prep.pad_y) / prep.scale;
 
-                // 简单裁剪到图像尺寸范围（可选）
-                rx1 = std::max(0.0f, std::min(rx1, static_cast<float>(image.cols - 1)));
-                ry1 = std::max(0.0f, std::min(ry1, static_cast<float>(image.rows - 1)));
-                rx2 = std::max(0.0f, std::min(rx2, static_cast<float>(image.cols - 1)));
-                ry2 = std::max(0.0f, std::min(ry2, static_cast<float>(image.rows - 1)));
+                rx1 = std::clamp(rx1, 0.f, (float)image.cols - 1);
+                ry1 = std::clamp(ry1, 0.f, (float)image.rows - 1);
+                rx2 = std::clamp(rx2, 0.f, (float)image.cols - 1);
+                ry2 = std::clamp(ry2, 0.f, (float)image.rows - 1);
 
-                // 丢弃无效框
-                if (rx2 <= rx1 || ry2 <= ry1) continue;
+                if (rx2 <= rx1 || ry2 <= ry1) 
+                    continue;
 
                 cands.push_back({best_cls, best_score, rx1, ry1, rx2, ry2});
             }
 
-            // ============ 3. NMS（class-agnostic, IoU = 0.35） ============
-            // 计算 IoU 的小函数（x1,y1,x2,y2 格式）
+            // ============ 5. NMS（class-agnostic, IoU = 0.35） ============
             auto iou = [](const Cand& a, const Cand& b) {
                 float xx1 = std::max(a.x1, b.x1);
                 float yy1 = std::max(a.y1, b.y1);
@@ -359,78 +355,79 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
                 return inter / uni;
             };
 
-            // 置信度从高到低排序
             std::sort(cands.begin(), cands.end(),
-                    [](const Cand& a, const Cand& b) { return a.score > b.score; });
+                      [](const Cand& a, const Cand& b) { return a.score > b.score; });
 
-            const float IOU_THRESH = 0.35f;        // 你的参数
-            const int   TOPK       = 300;          // 可按需调小/调大
-            std::vector<int> keep;
-            keep.reserve(cands.size());
+            const float IOU_THRESH = 0.35f;
+            const int   TOPK       = 300;
+            std::vector<int> keep; keep.reserve(cands.size());
 
             for (int i = 0; i < (int)cands.size(); ++i) {
                 if ((int)keep.size() >= TOPK) break;
                 bool suppressed = false;
                 for (int j = 0; j < (int)keep.size(); ++j) {
                     if (iou(cands[i], cands[keep[j]]) > IOU_THRESH) {
-                        suppressed = true;
-                        break;
+                        suppressed = true; break;
                     }
                 }
                 if (!suppressed) keep.push_back(i);
             }
 
-            // ============ 4. 输出 Detection ============
+            // ============ 6. 输出 ============
+            #ifdef _DEBUG_
             cv::Mat vis = image.clone();
+            #endif
+
             detections.reserve(keep.size());
             for (int idx : keep) {
                 const auto& c = cands[idx];
                 Detection det;
-                det.region.x      = static_cast<int>(c.x1);
-                det.region.y      = static_cast<int>(c.y1);
-                det.region.width  = static_cast<int>(c.x2);
-                det.region.height = static_cast<int>(c.y2);
+
+                det.region.x      = (int)std::round(c.x1);
+                det.region.y      = (int)std::round(c.y1);
+                det.region.width  = (int)std::round(c.x2 - c.x1);
+                det.region.height = (int)std::round(c.y2 - c.y1);
                 det.confidence    = c.score;
 
-                if (c.cls >= 0 && c.cls < (int)class_names.size()) {
+                if (c.cls >= 0 && c.cls < (int)class_names.size())
                     det.label = class_names[c.cls];
-                } else {
+                else
                     det.label = "class_" + std::to_string(std::max(0, c.cls));
-                }
+
+                #ifdef _DEBUG_
                 std::cout << "label: " << det.label << std::endl;
-
-                char buf[128]; 
+                char buf[128];
                 std::snprintf(buf, sizeof(buf), "%s %.2f", det.label.c_str(), c.score);
-                
-                int base=0; 
+                int base=0;
                 auto t = cv::getTextSize(buf, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &base);
-                
-                cv::rectangle(
-                    vis, 
-                    cv::Rect(cv::Point(det.region.x, std::max(0, det.region.y - t.height - 6)),
-                            cv::Size(t.width + 6, t.height + 6)),
-                    cv::Scalar(0, 255, 0),
-                    2
-                );
 
-                cv::putText(vis, buf, cv::Point(det.region.x + 3, det.region.y - 3), cv::FONT_HERSHEY_SIMPLEX, 0.5,
-                            cv::Scalar(0,0,0), 1, cv::LINE_AA);
+                // 文本背景
+                cv::rectangle(
+                    vis,
+                    cv::Rect(cv::Point(det.region.x, std::max(0, det.region.y - t.height - 6)),
+                             cv::Size(t.width + 6, t.height + 6)),
+                    cv::Scalar(0, 255, 0),
+                    cv::FILLED
+                );
+                cv::putText(vis, buf, cv::Point(det.region.x + 3, det.region.y - 3),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0,0,0), 1, cv::LINE_AA);
+
+                // 主框
+                cv::rectangle(vis,
+                              cv::Rect(det.region.x, det.region.y, det.region.width, det.region.height),
+                              cv::Scalar(0,255,0), 2);
+                #endif
 
                 detections.push_back(std::move(det));
             }
 
             #ifdef _DEBUG_
-                // 构造文件名：frame_xxx.jpg
-                std::ostringstream oss;
-                oss << "/tmp/debug_frame_" << frame.timestamp << ".jpg";
-                std::string debug_filename = oss.str();
-
-                // 写入
-                cv::imwrite(debug_filename, vis);
-
-                std::cout << "[DEBUG] Saved debug frame: " << debug_filename
-                        << "  (" << vis.cols << "x" << vis.rows << ")" << std::endl;
-                
+            
+            std::ostringstream oss;
+            oss << "/tmp/debug_frame_" << frame.timestamp << ".jpg";
+            cv::imwrite(oss.str(), vis);
+            std::cout << "[DEBUG] Saved debug frame: " << oss.str()
+                      << "  (" << vis.cols << "x" << vis.rows << ")" << std::endl;
             #endif
 
         } catch (const Ort::Exception& ex) {
@@ -443,6 +440,7 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
     std::cout << "==============================================================\n" << std::endl;
     return detections;
 }
+
 
 }  // namespace app
 

@@ -129,6 +129,7 @@ PreprocessInfo preprocess_letterbox(const cv::Mat& img, int input_w, int input_h
     int img_h = img.rows;
 
     float scale = std::min((float)input_w / img_w, (float)input_h / img_h);
+
     int new_w = static_cast<int>(img_w * scale);
     int new_h = static_cast<int>(img_h * scale);
 
@@ -137,6 +138,7 @@ PreprocessInfo preprocess_letterbox(const cv::Mat& img, int input_w, int input_h
 
     int pad_x = (input_w - new_w) / 2;
     int pad_y = (input_h - new_h) / 2;
+    
     cv::Mat letterbox(input_h, input_w, img.type(), cv::Scalar(114, 114, 114));
     resized.copyTo(letterbox(cv::Rect(pad_x, pad_y, new_w, new_h)));
 
