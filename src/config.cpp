@@ -86,7 +86,7 @@ AppConfig loadConfig(const std::string& path) {
 
     /** here we add MAC address tricklly **/
     std::string mac_address = detectLocalMac();
-    std::string with_mac_cliend_id = mqtt.getString("client_id") + "-" + mac_address;
+    std::string with_mac_cliend_id = mqtt.getString("client_id") + "_" + mac_address;
     config.mqtt.client_id = with_mac_cliend_id;
 
     std::string with_mac_commands = mqtt.getString("subscribe_topic") + mac_address;
