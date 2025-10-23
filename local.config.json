@@ -1,19 +1,19 @@
 {
   "version": "0.9.121",
   "mqtt": {
-    "client_id": "edge-analytics-client",
+    "client_id": "edge_analytics",
     "port": 1883,
-    "publish_topic": "edge/results",
-    "heartbeat_topic": "edge/heartbeat",
+    "publish_topic": "/edge/results",
+    "heartbeat_topic": "/edge/heartbeat",
     "server": "120.27.239.25",
     "username": "edge-user",
     "password": "edge-pass",
-    "subscribe_topic": "edge/commands",
-    "heartbeat_time": 10
+    "subscribe_topic": "/edge/commands/",
+    "heartbeat_time": 60
   },
   "rtsp": {
     "host": "127.0.0.1",
-    "path": "/SinoWin",
+    "path": "/live.stream",
     "port": 8554,
     "width": 1920,
     "height": 1080
