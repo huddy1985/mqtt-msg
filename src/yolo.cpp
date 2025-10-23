@@ -238,9 +238,11 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
 
             std::array<int64_t, 4> input_shape{1, 3, real_height, real_width};
             Ort::MemoryInfo mem_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeCPU);
+            
             Ort::Value input_tensor_val = Ort::Value::CreateTensor<float>(
                 mem_info, prep.input_tensor.data(), prep.input_tensor.size(),
-                input_shape.data(), input_shape.size());
+                input_shape.data(), input_shape.size()
+            );
 
             // ============ 2. 推理 ============
             auto outputs = impl_->session->Run(
@@ -275,7 +277,7 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
                 return data[attr_idx * N + i_box];
             };
 
-            // ============ 3. 明确参数（基于“之前能识别”的设定） ============
+            // ============ 3. 明确参数 ============
             // -> 无 objectness: C = 4 + num_classes
             const bool has_obj   = false;         // *** 固定为无 obj ***
             const int  offset_cls = 4;
@@ -291,8 +293,14 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
                     class_names[c] = "class_" + std::to_string(c);
             }
 
-            struct Cand { int cls; float score; float x1,y1,x2,y2; };
-            std::vector<Cand> cands; cands.reserve(std::min(N, 20000));
+            struct Cand { 
+                int cls; 
+                float score; 
+                float x1,y1,x2,y2; 
+            };
+
+            std::vector<Cand> cands; 
+            cands.reserve(std::min(N, 20000));
 
             // ============ 4. 解析框（固定 cxcywh → xyxy） ============
             for (int i = 0; i < N; ++i) {
@@ -311,7 +319,10 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
                 float best_prob = -1.0f;
                 for (int c = 0; c < num_classes; ++c) {
                     float p = get_at(offset_cls + c, i); // 已含 Sigmoid/Softmax 概率
-                    if (p > best_prob) { best_prob = p; best_cls = c; }
+                    if (p > best_prob) { 
+                        best_prob = p; 
+                        best_cls = c; 
+                    }
                 }
                 
                 float best_score = best_prob; // **不要乘 obj**
@@ -354,9 +365,6 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
                 float uni = areaA + areaB - inter + 1e-6f;
                 return inter / uni;
             };
-
-            std::sort(cands.begin(), cands.end(),
-                      [](const Cand& a, const Cand& b) { return a.score > b.score; });
 
             const float IOU_THRESH = 0.35f;
             const int   TOPK       = 300;
@@ -422,7 +430,6 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
             }
 
             #ifdef _DEBUG_
-            
             std::ostringstream oss;
             oss << "/tmp/debug_frame_" << frame.timestamp << ".jpg";
             cv::imwrite(oss.str(), vis);
