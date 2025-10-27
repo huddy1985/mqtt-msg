@@ -350,9 +350,7 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
     if (regions.empty()) {
         regions.push_back(Region{0, 0, 0, 0});
     }
-
-    bool useCnn = (result.model.type == "cnn");
-    bool useYolo = (!useCnn && result.model.type.rfind("yolo", 0) == 0);
+    
     std::size_t frameCount = regions.size();
 
     std::vector<CapturedFrame> capturedFrames;

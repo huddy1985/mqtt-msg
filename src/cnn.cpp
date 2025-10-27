@@ -16,7 +16,8 @@
 
 namespace app {
 
-struct CnnModel::Impl {
+struct CnnModel::Impl
+{
     Impl() : env(ORT_LOGGING_LEVEL_WARNING, "InspectAI") {}
 
     Ort::Env env;
@@ -31,7 +32,8 @@ struct CnnModel::Impl {
 
 namespace {
 
-std::uint64_t fingerprint(const std::vector<std::uint8_t>& data) {
+std::uint64_t fingerprint(const std::vector<std::uint8_t>& data)
+{
     const std::size_t step = data.size() > 1024 ? data.size() / 1024 : 1;
     std::uint64_t hash = 1469598103934665603ull;
     std::size_t processed = 0;
@@ -49,23 +51,23 @@ std::uint64_t fingerprint(const std::vector<std::uint8_t>& data) {
 
 CnnModel::CnnModel(const ScenarioDefinition& config): Model(std::move(config)), 
                                                         config_(std::move(config)),
-                                                        type("cnn") {
+                                                        type("cnn")
+{
     load();
 }
 
 CnnModel::~CnnModel() = default;
 
-bool CnnModel::load() {
+bool CnnModel::load()
+{
     std::string model_path = config_.model.path;
 
     if (!model_path.empty() && model_path[0] != '/') {
         std::filesystem::path current_path = std::filesystem::current_path();
-        std::filesystem::path full_path = current_path / model_path;
-        model_path = full_path.string();
+        model_path = (current_path / model_path).string();
     }
 
-    std::filesystem::path path(model_path);
-    if (!std::filesystem::exists(path)) {
+    if (!std::filesystem::exists(model_path)) {
         throw std::runtime_error("CNN model file not found: " + model_path);
     }
 
@@ -73,49 +75,60 @@ bool CnnModel::load() {
 
     impl_->session_options.SetIntraOpNumThreads(1);
     impl_->session_options.SetGraphOptimizationLevel(ORT_ENABLE_EXTENDED);
-    impl_->session = std::make_unique<Ort::Session>(impl_->env, model_path.c_str(), impl_->session_options);
 
-    Ort::AllocatorWithDefaultOptions allocator;
-    std::size_t input_count = impl_->session->GetInputCount();
-    impl_->input_names.clear();
-    impl_->input_name_ptrs.clear();
-    impl_->input_names.reserve(input_count);
-    impl_->input_name_ptrs.reserve(input_count);
+    impl_->session = std::make_unique<Ort::Session>(
+        impl_->env, model_path.c_str(), impl_->session_options
+    );
 
-    std::vector<std::string> input_names = impl_->session->GetInputNames();
-    for (const auto& name : input_names) {
-        impl_->input_names.push_back(name);
-        impl_->input_name_ptrs.push_back(name.c_str());
+    // ---------------- 获取输入输出名称 ----------------
+    {
+        std::vector<std::string> names = impl_->session->GetInputNames();
+        impl_->input_names = names;
+        impl_->input_name_ptrs.clear();
+        for (auto& n : impl_->input_names) impl_->input_name_ptrs.push_back(n.c_str());
+    }
+    {
+        std::vector<std::string> names = impl_->session->GetOutputNames();
+        impl_->output_names = names;
+        impl_->output_name_ptrs.clear();
+        for (auto& n : impl_->output_names) impl_->output_name_ptrs.push_back(n.c_str());
     }
 
-    std::size_t output_count = impl_->session->GetOutputCount();
-    impl_->output_names.clear();
-    impl_->output_name_ptrs.clear();
-    impl_->output_names.reserve(output_count);
-    impl_->output_name_ptrs.reserve(output_count);
-
-    std::vector<std::string> output_names = impl_->session->GetOutputNames();
-    for (const auto& name : output_names) {
-        impl_->output_names.push_back(name);
-        impl_->output_name_ptrs.push_back(name.c_str());
-    }
-
-    if (input_count > 0) {
+    // ---------------- 解析输入维度(修正dynamic) ----------------
+    {
         Ort::TypeInfo type_info = impl_->session->GetInputTypeInfo(0);
         auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
-        impl_->input_shape = tensor_info.GetShape();
-        for (auto& dim : impl_->input_shape) {
-            if (dim <= 0) {
-                dim = 1;
-            }
+        std::vector<int64_t> s = tensor_info.GetShape();
+
+        if (s.size() == 4) {
+            if (s[0] <= 0) s[0] = 1;       // batch
+            if (s[1] <= 0) s[1] = 3;       // RGB channels
+            if (s[2] <= 0) s[2] = 128;     // height
+            if (s[3] <= 0) s[3] = 128;     // width
+        } else {
+            s = {1, 3, 128, 128};
         }
+        impl_->input_shape = std::move(s);
+
+        std::cerr << "[CNN] Using input shape: ["
+                  << impl_->input_shape[0] << ", "
+                  << impl_->input_shape[1] << ", "
+                  << impl_->input_shape[2] << ", "
+                  << impl_->input_shape[3] << "]\n";
     }
+
+    std::cout << "only extract image: " <<
+            "x: " << config_.detection_regions[0].x <<
+            "y:" << config_.detection_regions[0].y <<
+            "width: " << config_.detection_regions[0].width <<
+            "height: " << config_.detection_regions[0].height << std::endl;
 
     loaded_ = true;
     return true;
 }
 
-bool CnnModel::release() {
+bool CnnModel::release()
+{
     if (impl_) {
         impl_->input_names.clear();
         impl_->input_name_ptrs.clear();
@@ -138,98 +151,120 @@ std::string CnnModel::model_type()
     return type;
 }
 
-std::vector<Detection> CnnModel::infer(const CapturedFrame& frame) const {
+std::vector<Detection> CnnModel::infer(const CapturedFrame& frame) const
+{
     std::vector<Detection> predictions;
-    if (!loaded_ || frame.data.empty()) {
+    if (!loaded_ || !impl_ || !impl_->session || frame.data.empty()) {
         return predictions;
     }
 
-    if (impl_ && impl_->session) {
-        try {
-            cv::Mat encoded(1, frame.data.size(), CV_8UC1, const_cast<uint8_t*>(frame.data.data()));
-            cv::Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR);
+    try {
+        // 1) 解码 JPEG/PNG → BGR
+        cv::Mat encoded(1, static_cast<int>(frame.data.size()), CV_8UC1,
+                        const_cast<uint8_t*>(frame.data.data()));
+        cv::Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR);
 
-            if (image.empty()) {
-                std::cerr << "Failed to decode image" << std::endl;
-                return predictions;
-            }
-
-            std::vector<int64_t> input_shape = impl_->input_shape;
-            if (input_shape.empty()) {
-                input_shape = {1, static_cast<int64_t>(frame.data.size())};
-            }
-            std::size_t element_count = 1;
-            for (auto dim : input_shape) {
-                element_count *= static_cast<std::size_t>(dim);
-            }
-
-            std::vector<float> input_tensor(element_count, 0.0f);
-            if (!frame.data.empty()) {
-                for (std::size_t i = 0; i < element_count; ++i) {
-                    std::uint8_t value = frame.data[i % frame.data.size()];
-                    input_tensor[i] = static_cast<float>(value) / 255.0f;
-                }
-            }
-
-            Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-            Ort::Value tensor = Ort::Value::CreateTensor<float>(memory_info,
-                                                                input_tensor.data(),
-                                                                input_tensor.size(),
-                                                                input_shape.data(),
-                                                                input_shape.size());
-
-            // 修改：使用 std::move 来避免复制
-            std::vector<Ort::Value> inputs;
-            inputs.push_back(std::move(tensor)); // 使用 std::move()
-
-            auto outputs = impl_->session->Run(Ort::RunOptions{},
-                                               impl_->input_name_ptrs.data(),
-                                               inputs.data(),  // 传递数据
-                                               inputs.size(),  // 输入数量
-                                               impl_->output_name_ptrs.data(),
-                                               impl_->output_name_ptrs.size());
-
-            if (!outputs.empty() && outputs.front().IsTensor()) {
-                auto type_info = outputs.front().GetTensorTypeAndShapeInfo();
-                std::size_t output_elements = type_info.GetElementCount();
-                
-                const float* data = outputs.front().GetTensorData<float>(); // 显式指定模板参数为 float
-
-                if (data && output_elements > 0) {
-                    for (std::size_t i = 0; i < output_elements; ++i) {
-                        Detection pred;
-                        pred.label = "class_" + std::to_string(i);
-                        pred.confidence = std::max(0.0, std::min(1.0, static_cast<double>(data[i])));
-                        predictions.push_back(std::move(pred));
-                    }
-                }
-            }
-        } catch (const Ort::Exception& ex) {
-            (void)ex;
-            predictions.clear();
+        Region rg;
+        /** only support one region now. */
+        if (config_.detection_regions.size() != 1) {
+            rg.x = 740;
+            rg.y = 420;
+            rg.width = 240;
+            rg.height = 240;
+        } else {
+            rg = config_.detection_regions[0];
         }
+        cv::Mat ROI = extractROI(image, rg.x, rg.y, rg.width, rg.height);
+
+        #ifdef _DEBUG_
+        cv::Mat vis = ROI.clone();
+        std::ostringstream oss;
+        oss << "/tmp/debug_frame_" << frame.timestamp << ".jpg";
+        cv::imwrite(oss.str(), vis);
+        std::cout << "[DEBUG] Saved debug frame: " << oss.str()
+                    << "  (" << vis.cols << "x" << vis.rows << ")" << std::endl;
+        #endif
+
+        if (image.empty()) {
+            std::cerr << "[CNN] Failed to decode image.\n";
+            return predictions;
+        }
+
+        // 2) resize 到模型输入大小 (128x128)
+        const int target_h = static_cast<int>(impl_->input_shape[2]);
+        const int target_w = static_cast<int>(impl_->input_shape[3]);
+        cv::Mat resized;
+        cv::resize(ROI, resized, cv::Size(target_w, target_h), 0, 0, cv::INTER_LINEAR);
+
+        // 3) BGR → RGB
+        cv::Mat rgb;
+        cv::cvtColor(resized, rgb, cv::COLOR_BGR2RGB);
+
+        // 4) float32 / 255.0
+        rgb.convertTo(rgb, CV_32F, 1.0f / 255.0f);
+
+        // 5) Normalize (x-0.5)/0.5 = x*2 - 1   <-- 与 python 保持一致
+        rgb = rgb * 2.0f - 1.0f;
+
+        // 6) HWC -> CHW  填充输入 tensor
+        std::vector<float> input_tensor(1 * 3 * target_h * target_w);
+        size_t channel_size = static_cast<size_t>(target_h * target_w);
+        std::vector<cv::Mat> chw(3);
+        cv::split(rgb, chw);
+
+        for (int c = 0; c < 3; ++c) {
+            std::memcpy(input_tensor.data() + c * channel_size,
+                        chw[c].ptr<float>(),
+                        channel_size * sizeof(float));
+        }
+
+        // 7) 创建 ORT Tensor
+        Ort::MemoryInfo mem_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+        Ort::Value input = Ort::Value::CreateTensor<float>(
+            mem_info,
+            input_tensor.data(),
+            input_tensor.size(),
+            impl_->input_shape.data(),
+            impl_->input_shape.size()
+        );
+
+        // 8) 执行推理
+        auto outputs = impl_->session->Run(
+            Ort::RunOptions{},
+            impl_->input_name_ptrs.data(),
+            &input,
+            1,
+            impl_->output_name_ptrs.data(),
+            impl_->output_name_ptrs.size()
+        );
+
+        // 9) 解析输出 -> [1,2] 概率
+        const float* out = outputs[0].GetTensorData<float>();
+        float prob_clear = out[0];
+        float prob_hazy  = out[1];  // python: output.squeeze() > threshold → hazy
+
+        Detection d;
+        d.label = (prob_hazy > 0.5f) ? "Hazy" : "Clear";
+        d.confidence = std::max<double>(prob_clear, prob_hazy);
+        predictions.push_back(std::move(d));
+
+        return predictions;
+    } catch (const std::exception& ex) {
+        std::cerr << "[CNN] exception: " << ex.what() << '\n';
+        predictions.clear();
     }
-    
+
+    // fallback（仅当异常出现时启用 fingerprint）
     if (predictions.empty()) {
         std::uint64_t hash = fingerprint(frame.data);
-        double scaled = static_cast<double>((hash % 1000ull)) / 1000.0;
-        double confidence = 0.55 + std::fmod(scaled, 0.4);
-
-        Detection prediction;
-        prediction.label = (hash % 2 == 0) ? "normal" : "anomaly";
-        prediction.confidence = std::min(0.99, std::max(0.5, confidence));
-        predictions.push_back(prediction);
-
-        if ((hash % 5ull) == 0ull) {
-            Detection secondary;
-            secondary.label = prediction.label == "normal" ? "warning" : "normal";
-            secondary.confidence = std::max(0.3, 0.8 - prediction.confidence / 2.0);
-            predictions.push_back(secondary);
-        }
+        Detection d;
+        d.label = ((hash % 2) == 0) ? "Clear" : "Hazy";
+        d.confidence = 0.6;
+        predictions.push_back(d);
     }
-
     return predictions;
 }
+
 
 }  // namespace app
 
