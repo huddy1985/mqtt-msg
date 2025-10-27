@@ -25,6 +25,8 @@
       400
     ]
   ],
-  "confidence_threshold": 0.35,
-  "labels": ["eh_oil"]  
+  "confidence_threshold": 0.5,
+  "labels": [
+    "eh_oil"
+  ]
 }

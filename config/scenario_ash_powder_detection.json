@@ -25,6 +25,8 @@
       400
     ]
   ],
-  "confidence_threshold": 0.35,
-  "labels": ["ash_powder"]  
+  "confidence_threshold": 0.5,
+  "labels": [
+    "ash_powder"
+  ]
 }

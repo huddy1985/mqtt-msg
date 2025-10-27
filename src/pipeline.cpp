@@ -303,6 +303,10 @@ void ProcessingPipeline::add_missing(const std::string &scenario_id, const simpl
             def.detection_regions = parseRegions((*commandSource)["detection_regions"].asArray());
         }
 
+        if (commandSource->contains("confidence_threshold")) {
+            def.threshold = (*commandSource)["confidence_threshold"].asNumber();
+        }
+
         auto scenario = std::make_unique<Scenario>(def, path->config_path);
         if (!scenario->load_models()) {
             std::cerr << "Failed to load models for scenario " << scenario_id << "\n";
