@@ -75,6 +75,7 @@ AppConfig loadConfig(const std::string& path) {
 
     AppConfig config;
     config.source_path = absoluteConfigPath.generic_string();
+    config.version = root.getString("version");
 
     if (!root.contains("mqtt")) {
         throw std::runtime_error("Configuration missing 'mqtt' section");
@@ -82,13 +83,20 @@ AppConfig loadConfig(const std::string& path) {
     const auto& mqtt = root.at("mqtt");
     config.mqtt.server = mqtt.getString("server");
     config.mqtt.port = static_cast<int>(mqtt.getNumber("port"));
-    config.mqtt.client_id = mqtt.getString("client_id");
-    config.mqtt.subscribe_topic = mqtt.getString("subscribe_topic");
+
+    /** here we add MAC address tricklly **/
+    std::string mac_address = detectLocalMac();
+    std::string with_mac_cliend_id = mqtt.getString("client_id") + "_" + mac_address;
+    config.mqtt.client_id = with_mac_cliend_id;
+
+    std::string with_mac_commands = mqtt.getString("subscribe_topic") + mac_address;
+    config.mqtt.subscribe_topic = with_mac_commands;
+
     config.mqtt.publish_topic = mqtt.getString("publish_topic");
     config.mqtt.username = mqtt.getString("username");
     config.mqtt.password = mqtt.getString("password");
-    config.mqtt.heartbeat_time = mqtt.getNumber("hearttime");
-    config.mqtt.heartbeat_topic = mqtt.getString("hearttime_topic");
+    config.mqtt.heartbeat_time = mqtt.getNumber("heartbeat_time");
+    config.mqtt.heartbeat_topic = mqtt.getString("heartbeat_topic");
   
     if (!root.contains("rtsp")) {
         throw std::runtime_error("Configuration missing 'rtsp' section");
@@ -154,7 +162,11 @@ MqttConfig parse_mqtt_config(const simplejson::JsonValue &node) {
     }
 
     if (node.contains("subscribe_topic")) {
-        config.subscribe_topic = node["subscribe_topic"].asString();
+        std::string mac_addr = detectLocalMac();
+        std::string subscribe_tpoic = node["subscribe_topic"].asString();
+        std::cout << "subs topic: " << subscribe_tpoic + mac_addr << std::endl;
+
+        config.subscribe_topic = subscribe_tpoic + mac_addr;
     }
 
     if (node.contains("heartbeat_topic")) {
@@ -275,6 +287,7 @@ LocalConfig ConfigStore::load_local(const std::string &path) {
 
     if (root.contains("mqtt")) {
         config.mqtt = parse_mqtt_config(root["mqtt"]);
+        std::cout << "mqtt" << root["mqtt"].dump(4) << std::endl;
     }
 
     if (root.contains("scenarios")) {

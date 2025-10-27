@@ -66,14 +66,16 @@ struct MqttService::Impl {
         }
     }
 
-    ~Impl() {
+    ~Impl()
+    {
         if (client) {
             mosquitto_destroy(client.release());
         }
         mosquitto_lib_cleanup();
     }
 
-    void run() {
+    void run()
+    {
         std::cout << "=========== mqtt run ===============" << std::endl;
         
         stop_requested.store(false);
@@ -96,8 +98,10 @@ struct MqttService::Impl {
 
         int hearttime = config.mqtt.heartbeat_time == 0 ? 10 : config.mqtt.heartbeat_time;
         std::cout << "hearttime: " << hearttime << std::endl;
+        std::string version = config.version;
+        std::cout << "version: " << version << std::endl;
         
-        heartbeat_thread = std::thread([this, topic, hearttime]() {
+        heartbeat_thread = std::thread([this, topic, hearttime, version]() {
             while (!stop_requested.load()) {
                 try {
                     simplejson::JsonValue heartbeat = simplejson::makeObject();
@@ -108,11 +112,9 @@ struct MqttService::Impl {
                             ).count();
 
                     obj["timestamp"] = std::to_string(ts);
-
                     obj["macAddress"] = detectLocalMac();
-
+                    obj["version"] = version;
                     publishJson(heartbeat, topic);
-
                 } catch (const std::exception& ex) {
                     std::cerr << "[MQTT] Heartbeat send failed: " << ex.what() << std::endl;
                 }
@@ -136,7 +138,8 @@ struct MqttService::Impl {
 
     }
 
-    void stop() {
+    void stop()
+    {
         bool expected = false;
         if (stop_requested.compare_exchange_strong(expected, true)) {
             mosquitto_disconnect(client.get());
@@ -150,7 +153,8 @@ struct MqttService::Impl {
         }
     }
 
-    void publishJson(simplejson::JsonValue value, const std::string& topic_override = {}) {
+    void publishJson(simplejson::JsonValue value, const std::string& topic_override = {})
+    {
         std::lock_guard<std::mutex> lock(publish_mutex);
         std::string topic = topic_override.empty() ? publish_topic : topic_override;
         if (topic.empty()) {
@@ -166,7 +170,8 @@ struct MqttService::Impl {
         }
     }
 
-    void publishStatus(const std::string& state) {
+    void publishStatus(const std::string& state)
+    {
         simplejson::JsonValue payload;
         if (status_builder) {
             payload = status_builder();
@@ -252,6 +257,7 @@ struct MqttService::Impl {
             if (!self->config.mqtt.subscribe_topic.empty()) {
                 mosquitto_subscribe(mosq, nullptr, self->config.mqtt.subscribe_topic.c_str(), 1);
             }
+            std::cout << "connect success" << std::endl;
         } else {
             std::cerr << "MQTT connect failed: " << mosquitto_strerror(rc) << std::endl;
         }

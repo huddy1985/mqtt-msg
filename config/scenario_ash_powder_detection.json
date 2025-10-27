@@ -1,19 +1,20 @@
 {
-  "scenario_id": "ash_powder_detection",
-  "name": "Ash powder detection",
-  "description": "Monitors airborne ash accumulation via YOLOv11 models.",
+  "scenario_id": "coal_powder_detection",
+  "name": "Coal powder detection",
+  "description": "Detects coal powder dispersion using a YOLOv11 object detector.",
   "model": {
-    "id": "yolo11_ash",
-    "type": "yolo11",
-    "path": "models/smoke.onnx"
+    "id": "cnn_coal",
+    "type": "cnn",
+    "path": "models/cnn_haze.onnx"
   },
-  "mode": "continuous",
+  "action": "enable",
+  "mode": "continues",
   "detection_regions": [
     [
-      0,
-      0,
-      1920,
-      1080
+      740,
+      420,
+      240,
+      240
     ]
   ],
   "filter_regions": [
@@ -24,7 +25,6 @@
       400
     ]
   ],
-  "confidence_threshold": 0.7,
-  "iou_threshold": 0.5,
-  "labels": ["fire", "default", "smoke"]
+  "confidence_threshold": 0.35,
+  "labels": ["ash_powder"]  
 }

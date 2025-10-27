@@ -1,0 +1,30 @@
+{
+  "scenario_id": "coal_powder_detection",
+  "name": "Coal powder detection",
+  "description": "Detects coal powder dispersion using a YOLOv11 object detector.",
+  "model": {
+    "id": "cnn_coal",
+    "type": "cnn",
+    "path": "models/cnn_haze.onnx"
+  },
+  "action": "enable",
+  "mode": "continues",
+  "detection_regions": [
+    [
+      740,
+      420,
+      240,
+      240
+    ]
+  ],
+  "filter_regions": [
+    [
+      100,
+      100,
+      400,
+      400
+    ]
+  ],
+  "confidence_threshold": 0.35,
+  "labels": ["eh_oil"]  
+}

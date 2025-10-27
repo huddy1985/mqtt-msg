@@ -3,16 +3,18 @@
   "name": "Coal powder detection",
   "description": "Detects coal powder dispersion using a YOLOv11 object detector.",
   "model": {
-    "id": "yolo11_coal",
-    "type": "yolo11",
-    "path": "models/yolo11_traffic.onnx"
+    "id": "cnn_coal",
+    "type": "cnn",
+    "path": "models/cnn_haze.onnx"
   },
+  "action": "enable",
+  "mode": "continues",
   "detection_regions": [
     [
-      0,
-      0,
-      1920,
-      1080
+      740,
+      420,
+      240,
+      240
     ]
   ],
   "filter_regions": [
@@ -23,8 +25,6 @@
       400
     ]
   ],
-  "postprocessing": {
-    "confidence_threshold": 0.35,
-    "iou_threshold": 0.45
-  }
+  "confidence_threshold": 0.35,
+  "labels": ["coal_powder"]  
 }
