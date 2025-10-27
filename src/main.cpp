@@ -371,7 +371,7 @@ int main(int argc, char* argv[]) {
             std::vector<app::Command> commands = app::parseCommandList(*commandSource);
             for (const auto& command: commands) {
                 if (command.action == "enable") {
-                    pipeline.add_missing(command.scenario_id);
+                    pipeline.add_missing(command.scenario_id, commandSource);
                 } else if (command.action == "disable") {
                     pipeline.remove_inactive(command.scenario_id);
                 }

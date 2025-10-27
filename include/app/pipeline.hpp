@@ -41,7 +41,7 @@ public:
     const AppConfig& config() const { return config_; }
 
     void remove_inactive(const std::string &scenario_id);
-    void add_missing(const std::string &scenario_id);
+    void add_missing(const std::string &scenario_id, const simplejson::JsonValue* commandSource=NULL);
 
 private:
     const ScenarioConfig* findScenario(const std::string& scenario_id) const;

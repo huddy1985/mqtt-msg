@@ -267,7 +267,7 @@ void ProcessingPipeline::remove_inactive(const std::string &scenario_id) {
     }
 }
 
-void ProcessingPipeline::add_missing(const std::string &scenario_id) {
+void ProcessingPipeline::add_missing(const std::string &scenario_id, const simplejson::JsonValue* commandSource) {
     std::unique_lock lock(scenarios_mutex_);
     
     if (active_scenarios_.find(scenario_id) != active_scenarios_.end()) {
@@ -279,25 +279,31 @@ void ProcessingPipeline::add_missing(const std::string &scenario_id) {
         return;
     }
 
-    auto path_it = config_.scenarios.begin();
+    auto path = config_.scenarios.begin();
 
-    for (; path_it != config_.scenarios.end(); path_it++) {
-        if (path_it->id == scenario_id) {
+    for (; path != config_.scenarios.end(); path++) {
+        if (path->id == scenario_id) {
             break;
         }
     }
     
-    if (path_it == config_.scenarios.end()) {
+    if (path == config_.scenarios.end()) {
         std::cerr << "Scenario " << scenario_id << " not found in configuration map\n";
         return;
     }
 
     try {
-        ScenarioDefinition def = store_->load_scenario_file(path_it->config_path);
+        ScenarioDefinition def = store_->load_scenario_file(path->config_path);
         if (def.id.empty()) {
             def.id = scenario_id;
         }
-        auto scenario = std::make_unique<Scenario>(def, path_it->config_path);
+
+        /** whether upserver comes different parameters. */
+        if (commandSource->contains("detection_regions")) {
+            def.detection_regions = parseRegions((*commandSource)["detection_regions"].asArray());
+        }
+
+        auto scenario = std::make_unique<Scenario>(def, path->config_path);
         if (!scenario->load_models()) {
             std::cerr << "Failed to load models for scenario " << scenario_id << "\n";
             return;
