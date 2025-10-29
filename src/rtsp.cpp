@@ -64,7 +64,7 @@ std::vector<CapturedFrame> RtspFrameGrabber::capture(double fps,
     frames.reserve(max_frames);
 
     std::vector<std::uint8_t> frameBuffer;
-    frameBuffer.reserve(1024 * 1024 * 3);
+    frameBuffer.reserve(1024 * 1024 * 180);
 
     std::array<std::uint8_t, 4096> buffer{};
     std::uint8_t previous = 0;

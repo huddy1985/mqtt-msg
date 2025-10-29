@@ -362,9 +362,16 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
     }
     
     std::size_t frameCount = regions.size();
+    frameCount = fps;
 
     std::vector<CapturedFrame> capturedFrames;
     try {
+        
+        #ifdef _DEBUG_
+        std::cout << "fps: " << fps << std::endl;
+        std::cout << "frameCount: " << frameCount << std::endl;
+        #endif
+
         capturedFrames = frame_grabber_.capture(fps, frameCount, std::chrono::milliseconds(5000));
     } catch (const std::exception& ex) {
         std::cerr << "RTSP capture failed: " << ex.what() << "\n";
