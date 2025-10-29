@@ -244,9 +244,20 @@ std::vector<Detection> CnnModel::infer(const CapturedFrame& frame) const
         float prob_hazy  = out[1];  // python: output.squeeze() > threshold → hazy
 
         Detection d;
-        d.label = (prob_hazy > 0.5f) ? "Hazy" : "Clear";
-        d.confidence = std::max<double>(prob_clear, prob_hazy);
-        predictions.push_back(std::move(d));
+
+        #ifdef _DEBUG_
+        std::cout << "threshold: " << config_.threshold << std::endl;
+        #endif
+        if (prob_hazy > config_.threshold) {
+            
+            d.label = config_.labels[0];
+            d.confidence = prob_hazy;
+            predictions.push_back(std::move(d));
+        } else {
+            d.label = "clear";
+            d.confidence = prob_clear;
+            predictions.push_back(std::move(d));
+        }
 
         return predictions;
     } catch (const std::exception& ex) {
