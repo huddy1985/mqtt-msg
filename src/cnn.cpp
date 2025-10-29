@@ -1,5 +1,5 @@
-#include "app/cnn.hpp"
 
+#include <mutex>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -9,6 +9,8 @@
 #include <string>
 #include <iostream>
 #include <vector>
+
+#include "app/cnn.hpp"
 
 #ifdef APP_HAS_ONNXRUNTIME
 #include <onnxruntime_cxx_api.h>
@@ -162,7 +164,18 @@ std::vector<Detection> CnnModel::infer(const CapturedFrame& frame) const
         // 1) 解码 JPEG/PNG → BGR
         cv::Mat encoded(1, static_cast<int>(frame.data.size()), CV_8UC1,
                         const_cast<uint8_t*>(frame.data.data()));
-        cv::Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR);
+        
+        static std::mutex imdecode_mutex;
+        cv::Mat image;
+        {
+            std::lock_guard<std::mutex> lk(imdecode_mutex);
+            image = cv::imdecode(encoded, cv::IMREAD_COLOR); // BGR
+        }
+
+        if (image.empty()) {
+            std::cerr << "[CNN] Failed to decode image.\n";
+            return predictions;
+        }
 
         Region rg;
         /** only support one region now. */

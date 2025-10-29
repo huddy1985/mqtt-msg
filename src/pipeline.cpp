@@ -1,5 +1,4 @@
-#include "app/pipeline.hpp"
-
+#include <future>  // 顶部增加
 #include <algorithm>
 #include <chrono>
 #include <cctype>
@@ -17,6 +16,7 @@
 
 #include "app/cnn.hpp"
 #include "app/yolo.hpp"
+#include "app/pipeline.hpp"
 
 namespace app {
 namespace {
@@ -156,8 +156,12 @@ std::string saveFrameToDisk(const std::filesystem::path& directory,
 }  // namespace
 
 ProcessingPipeline::ProcessingPipeline(AppConfig config, ConfigStore *store)
-    : config_(std::move(config)), frame_grabber_(config_.rtsp), store_(store) {
-    }
+    : config_(std::move(config))
+    , frame_grabber_(config_.rtsp)
+    , store_(store)
+    , thread_pool_(static_cast<std::size_t>(std::max<std::int64_t>(1, static_cast<std::int64_t>(config_.thread_pool_size))))
+{
+}
 
 const ScenarioConfig* ProcessingPipeline::findScenario(const std::string& scenario_id) const {
     auto it = config_.scenario_lookup.find(scenario_id);
@@ -346,8 +350,6 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
         return results;
     }
     std::cout << "=== process image ===" << std::endl;
-
-    auto active_scenario = scenario->second;
     
     result.scenario_id = scenarioConfig->id;
     result.model = scenarioConfig->model;
@@ -361,8 +363,7 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
         regions.push_back(Region{0, 0, 0, 0});
     }
     
-    std::size_t frameCount = regions.size();
-    frameCount = fps;
+    std::size_t frameCount = fps;
 
     std::vector<CapturedFrame> capturedFrames;
     try {
@@ -379,85 +380,114 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
 
     std::filesystem::path captureDir = ensureCaptureDirectory(config_.service.name, scenarioConfig->id);
 
+    std::vector<std::future<FrameResult>> futures;
+    futures.reserve(frameCount);
+
+    // 固定数据快照，避免竞态
+    auto active_scenario = scenario->second;                               // shared_ptr
+    const auto model_type = active_scenario->model_type();                 // "cnn"/"yolo"/other
+    const auto scenario_id_copy = scenarioConfig->id;                      // string
+    const auto scenario_model_copy = scenarioConfig->model;                // ModelInfo
+    const auto threshold_copy = command.threshold;                         // double
+    const auto filter_regions_copy = command.filter_regions;               // vector<Region>
+    auto regions_copy = regions;                                           // vector<Region>
+    const double fps_copy = fps;
+    const double interval_copy = interval;
+    const auto captureDirCopy = captureDir;
+
     for (std::size_t index = 0; index < frameCount; ++index) {
-        FrameResult frame;
+        // 先准备时间戳与磁盘落图（主线程执行）
+        FrameResult baseFrame;
         if (index < capturedFrames.size()) {
-            frame.timestamp = capturedFrames[index].timestamp;
-            std::string path = saveFrameToDisk(captureDir, index, capturedFrames[index]);
-            frame.image_path = path;
+            baseFrame.timestamp = capturedFrames[index].timestamp;
+            std::string path = saveFrameToDisk(captureDirCopy, index, capturedFrames[index]);
+            baseFrame.image_path = path;
         } else {
-            frame.timestamp = index * interval;
+            baseFrame.timestamp = index * interval_copy;
         }
 
-        if (active_scenario->model_type() == "cnn") {
-            const CapturedFrame* frameData = (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
-            CapturedFrame synthetic;
-            if (!frameData) {
-                synthetic.timestamp = frame.timestamp;
-                synthetic.format = "synthetic";
-                synthetic.data.reserve(regions.size() * 4 + scenarioConfig->id.size());
-                for (const auto& region : regions) {
-                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x + region.y) & 0xFF));
-                    synthetic.data.push_back(static_cast<std::uint8_t>((region.width + region.height) & 0xFF));
+        futures.push_back(thread_pool_.enqueue(
+            [=, &capturedFrames]() -> FrameResult {
+                FrameResult frame = baseFrame;
+
+                if (model_type == "cnn") {
+                    const CapturedFrame* frameData =
+                        (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
+                    CapturedFrame synthetic;
+                    if (!frameData) {
+                        synthetic.timestamp = frame.timestamp;
+                        synthetic.format = "synthetic";
+                        synthetic.data.reserve(regions_copy.size() * 4 + scenario_id_copy.size());
+                        for (const auto& region : regions_copy) {
+                            synthetic.data.push_back(static_cast<std::uint8_t>((region.x + region.y) & 0xFF));
+                            synthetic.data.push_back(static_cast<std::uint8_t>((region.width + region.height) & 0xFF));
+                        }
+                        for (char ch : scenario_id_copy) {
+                            synthetic.data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
+                        }
+                        frameData = &synthetic;
+                    }
+
+                    auto predictions = active_scenario->analyze(*frameData);
+                    if (predictions.empty()) {
+                        predictions.push_back(Detection{"unknown"});
+                    }
+                    for (std::size_t detIndex = 0; detIndex < predictions.size(); ++detIndex) {
+                        Region region = detIndex < regions_copy.size() ? regions_copy[detIndex] : Region{0,0,0,0};
+                        bool filtered = isFiltered(region, filter_regions_copy);
+                        DetectionResult detection;
+                        detection.region = region;
+                        detection.filtered = filtered;
+                        detection.label = predictions[detIndex].label;
+                        detection.confidence = predictions[detIndex].confidence;
+                        frame.detections.push_back(std::move(detection));
+                    }
+
+                } else if (model_type == "yolo") {
+                    const CapturedFrame* frameData =
+                        (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
+                    CapturedFrame synthetic;
+                    if (!frameData) {
+                        synthetic.timestamp = frame.timestamp;
+                        synthetic.format = "synthetic";
+                        synthetic.data.reserve(regions_copy.size() * 4 + scenario_id_copy.size());
+                        for (const auto& region : regions_copy) {
+                            synthetic.data.push_back(static_cast<std::uint8_t>((region.x ^ region.height) & 0xFF));
+                            synthetic.data.push_back(static_cast<std::uint8_t>((region.width ^ region.y) & 0xFF));
+                        }
+                        for (char ch : scenario_id_copy) {
+                            synthetic.data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
+                        }
+                        frameData = &synthetic;
+                    }
+
+                    auto detections = active_scenario->analyze(*frameData);
+                    for (const auto& yoloDet : detections) {
+                        Region region = yoloDet.region;
+                        bool filtered = isFiltered(region, filter_regions_copy);
+                        DetectionResult detection;
+                        detection.region = region;
+                        detection.filtered = filtered;
+                        detection.label = yoloDet.label;
+                        detection.confidence = yoloDet.confidence;
+                        frame.detections.push_back(std::move(detection));
+                    }
+
+                } else {
+                    const auto& region = regions_copy[index % regions_copy.size()];
+                    bool filtered = isFiltered(region, filter_regions_copy);
+                    DetectionResult detection = makeDetection(region, scenario_model_copy, threshold_copy, filtered);
+                    frame.detections.push_back(detection);
                 }
-                for (char ch : scenarioConfig->id) {
-                    synthetic.data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
-                }
-                frameData = &synthetic;
-            }
 
-            auto predictions = active_scenario->analyze(*frameData);
-            if (predictions.empty()) {
-                predictions.push_back(Detection{"unknown"});
+                return frame;
             }
+        ));
+    }
 
-            for (std::size_t detIndex = 0; detIndex < predictions.size(); ++detIndex) {
-                Region region = detIndex < regions.size() ? regions[detIndex] : Region{0, 0, 0, 0};
-                bool filtered = isFiltered(region, command.filter_regions);
-                DetectionResult detection;
-                detection.region = region;
-                detection.filtered = filtered;
-                detection.label = predictions[detIndex].label;
-                detection.confidence = predictions[detIndex].confidence;
-                frame.detections.push_back(std::move(detection));
-            }
-        } else if (active_scenario->model_type() == "yolo") {
-            const CapturedFrame* frameData = (index < capturedFrames.size()) ? &capturedFrames[index] : nullptr;
-            CapturedFrame synthetic;
-
-            if (!frameData) {
-                synthetic.timestamp = frame.timestamp;
-                synthetic.format = "synthetic";
-                synthetic.data.reserve(regions.size() * 4 + scenarioConfig->id.size());
-                for (const auto& region : regions) {
-                    synthetic.data.push_back(static_cast<std::uint8_t>((region.x ^ region.height) & 0xFF));
-                    synthetic.data.push_back(static_cast<std::uint8_t>((region.width ^ region.y) & 0xFF));
-                }
-                for (char ch : scenarioConfig->id) {
-                    synthetic.data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(ch)));
-                }
-                frameData = &synthetic;
-            }
-
-            auto detections = active_scenario->analyze(*frameData);
-            for (const auto& yoloDet : detections) {
-                Region region = yoloDet.region;
-                bool filtered = isFiltered(region, command.filter_regions);
-                DetectionResult detection;
-                detection.region = region;
-                detection.filtered = filtered;
-                detection.label = yoloDet.label;
-                detection.confidence = yoloDet.confidence;
-                frame.detections.push_back(std::move(detection));
-            }
-        } else {
-            const auto& region = regions[index % regions.size()];
-            bool filtered = isFiltered(region, command.filter_regions);
-            DetectionResult detection = makeDetection(region, result.model, command.threshold, filtered);
-            frame.detections.push_back(detection);
-        }
-
-        result.frames.push_back(std::move(frame));
+    // 有序回收
+    for (auto& fut : futures) {
+        result.frames.push_back(fut.get());
     }
 
     results.push_back(std::move(result));

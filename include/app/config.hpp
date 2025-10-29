@@ -76,6 +76,8 @@ struct AppConfig {
     
     std::map<std::string, std::string> scenario_files;
     std::vector<std::string> active_scenarios;
+
+    int thread_pool_size;
 };
 
 AppConfig loadConfig(const std::string& path);

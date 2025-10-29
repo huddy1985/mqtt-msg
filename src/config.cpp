@@ -115,6 +115,12 @@ AppConfig loadConfig(const std::string& path) {
     if (!root.contains("scenarios")) {
         throw std::runtime_error("Configuration missing 'scenarios' section");
     }
+
+    if (root.contains("thread_pool_size")) {
+        config.thread_pool_size = root.getNumber("thread_pool_size");
+        std::cout << "multi-thread: " << config.thread_pool_size;
+    }
+
     const auto& scenarios = root.at("scenarios").asArray();
     for (const auto& scenario : scenarios) {
         ScenarioConfig entry = parseScenario(scenario, baseDir);
