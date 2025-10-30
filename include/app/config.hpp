@@ -27,6 +27,7 @@ struct RtspConfig {
 };
 
 struct MqttConfig {
+    std::string mac_addr;
     std::string server;
     int port = 0;
 
@@ -68,6 +69,7 @@ struct ScenarioDefinition {
 struct AppConfig {
     std::string version;
     std::string source_path;
+
     MqttConfig mqtt;
     RtspConfig rtsp;
     ServiceInfo service;

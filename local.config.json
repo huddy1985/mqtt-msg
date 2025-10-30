@@ -12,6 +12,7 @@
     "heartbeat_time": 60
   },
   "rtsp": {
+    "mac": "",
     "host": "127.0.0.1",
     "path": "/live.stream",
     "port": 8554,
@@ -40,6 +41,7 @@
       "id": "liquid_leak_detection"
     }
   ],
+  "thread_pool_size": 8,
   "service": {
     "description": "Simulated MQTT driven analytics service",
     "name": "edge-video-analyzer"
