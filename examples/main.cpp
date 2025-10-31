@@ -1,77 +1,111 @@
 #include <onnxruntime_cxx_api.h>
+#include <opencv2/opencv.hpp>
 #include <iostream>
 #include <vector>
 #include <memory>
+#include <string>
 
 using namespace std;
 
-int main() 
-{
+// 将图像转换为浮点张量并归一化
+std::vector<float> preprocessImage(const cv::Mat& img, int height, int width) {
+    cv::Mat resized, float_img;
+    cv::resize(img, resized, cv::Size(width, height));
+    resized.convertTo(float_img, CV_32F, 1.0 / 255.0);
+    cv::cvtColor(float_img, float_img, cv::COLOR_BGR2RGB);
+
+    const std::vector<float> mean = {0.5f, 0.5f, 0.5f};
+    const std::vector<float> std  = {0.5f, 0.5f, 0.5f};
+
+    std::vector<float> input_tensor_values(3 * height * width);
+    for (int c = 0; c < 3; ++c) {
+        for (int h = 0; h < height; ++h) {
+            for (int w = 0; w < width; ++w) {
+                float val = float_img.at<cv::Vec3f>(h, w)[c];
+                // 与 Python 中的 Normalize 一致: (x - 0.5) / 0.5 = 2x - 1
+                val = (val - mean[c]) / std[c];
+                input_tensor_values[c * height * width + h * width + w] = val;
+            }
+        }
+    }
+    return input_tensor_values;
+}
+
+int main(int argc, char* argv[]) {
+    if (argc < 2) {
+        std::cerr << "用法: " << argv[0] << " <image_path>" << std::endl;
+        return -1;
+    }
+
+    const std::string image_path = argv[1];
+    const std::string model_path = "../models/cnn_haze.onnx";
+
     try {
-        // 初始化 ONNX Runtime 环境
+        // 初始化环境
         Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "CNNInference");
-        std::cout << "ONNX Runtime 环境初始化成功！" << std::endl;
-
-        // 加载 ONNX 模型
-        const std::string model_path = "cnn_model.onnx";  // 替换为你的 ONNX 模型文件路径
-        std::unique_ptr<Ort::Session> session;
-
         Ort::SessionOptions session_options;
         session_options.SetIntraOpNumThreads(1);
         session_options.SetGraphOptimizationLevel(ORT_ENABLE_EXTENDED);
-        session = std::make_unique<Ort::Session>(env, model_path.c_str(), session_options);
+        Ort::Session session(env, model_path.c_str(), session_options);
 
-        std::cout << "模型加载成功！" << std::endl;
+        std::cout << "模型加载成功: " << model_path << std::endl;
 
-        // 创建输入张量 (假设输入是 1x3x128x128 的图像)
-        std::vector<float> input_tensor_values(1 * 3 * 128 * 128, 1.0f);  // 示例数据，请用实际数据
-        std::vector<int64_t> input_tensor_shape = {1, 3, 128, 128};  // [batch_size, channels, height, width]
+        // 读取并预处理图像
+        cv::Mat img = cv::imread(image_path);
+        if (img.empty()) {
+            std::cerr << "无法读取图片: " << image_path << std::endl;
+            return -1;
+        }
 
-        // 创建张量
+        int input_h = 128;
+        int input_w = 128;
+        std::vector<float> input_tensor_values = preprocessImage(img, input_h, input_w);
+        std::vector<int64_t> input_tensor_shape = {1, 3, input_h, input_w};
+
+        // 创建输入张量
         Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-        Ort::Value input_tensor = Ort::Value::CreateTensor<float>(memory_info, 
-                input_tensor_values.data(),
-                input_tensor_values.size(),
-                input_tensor_shape.data(),
-                input_tensor_shape.size());
+        Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+            memory_info,
+            input_tensor_values.data(),
+            input_tensor_values.size(),
+            input_tensor_shape.data(),
+            input_tensor_shape.size()
+        );
 
-        std::cout << "输入张量创建成功！" << std::endl;
-
-        // 准备输入和输出张量名称
+        // 输入输出名
         std::vector<const char*> input_names = {"input"};
         std::vector<const char*> output_names = {"probabilities"};
 
-        // 执行推理
-        std::vector<Ort::Value> ort_inputs;
-        ort_inputs.push_back(std::move(input_tensor));
+        // 推理
+        auto output_tensors = session.Run(
+            Ort::RunOptions{nullptr},
+            input_names.data(),
+            &input_tensor,
+            1,
+            output_names.data(),
+            1
+        );
 
-        std::vector<Ort::Value> ort_outputs;  // 存储输出结果
+        float* output_data = output_tensors[0].GetTensorMutableData<float>();
+        size_t output_dim = output_tensors[0].GetTensorTypeAndShapeInfo().GetElementCount();
 
-        std::cout << "开始执行推理..." << std::endl;
+        std::cout << "推理结果:" << std::endl;
+        for (size_t i = 0; i < output_dim; ++i) {
+            std::cout << "Class[" << i << "] = " << output_data[i] << std::endl;
+        }
 
-        // 执行推理并检查错误
-        ort_outputs = session->Run(Ort::RunOptions{}, 
-                     input_names.data(), 
-                     ort_inputs.data(), 
-                     ort_inputs.size(), 
-                     output_names.data(), 
-                     output_names.size());
+        // 输出预测类别
+        auto max_iter = std::max_element(output_data, output_data + output_dim);
+        int predicted_class = std::distance(output_data, max_iter);
+        std::cout << "预测类别: " << predicted_class << " (置信度: " << *max_iter << ")" << std::endl;
 
-        std::cout << "推理完成！" << std::endl;
-
-        // 处理输出 (例如：打印第一个输出)
-        float* output_data = ort_outputs[0].GetTensorMutableData<float>();
-        std::cout << "模型输出: " << output_data[0] << std::endl;  // 根据模型的输出调整
-    }
-    catch (const Ort::Exception& e) {
+    } catch (const Ort::Exception& e) {
         std::cerr << "ONNX Runtime 错误: " << e.what() << std::endl;
         return -1;
-    }
-    catch (const std::exception& e) {
+    } catch (const std::exception& e) {
         std::cerr << "标准异常: " << e.what() << std::endl;
         return -1;
-    }
-    catch (...) {
+    } catch (...) {
         std::cerr << "未知错误发生！" << std::endl;
         return -1;
     }
