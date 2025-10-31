@@ -27,6 +27,7 @@
     ]
   ],
   "confidence_threshold": 0.5,
+  "thread_pool_size": 8,
   "labels": [
     "ash_powder"
   ]
