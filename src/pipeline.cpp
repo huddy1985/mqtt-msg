@@ -398,6 +398,7 @@ std::vector<AnalysisResult> ProcessingPipeline::process(const Command& command) 
     for (std::size_t index = 0; index < frameCount; ++index) {
         // 先准备时间戳与磁盘落图（主线程执行）
         FrameResult baseFrame;
+        
         if (index < capturedFrames.size()) {
             baseFrame.timestamp = capturedFrames[index].timestamp;
             std::string path = saveFrameToDisk(captureDirCopy, index, capturedFrames[index]);

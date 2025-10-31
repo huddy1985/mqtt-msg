@@ -118,7 +118,7 @@ AppConfig loadConfig(const std::string& path) {
 
     if (root.contains("thread_pool_size")) {
         config.thread_pool_size = root.getNumber("thread_pool_size");
-        std::cout << "multi-thread: " << config.thread_pool_size;
+        std::cout << "multi-thread: " << config.thread_pool_size << std::endl;
     }
 
     const auto& scenarios = root.at("scenarios").asArray();
