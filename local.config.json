@@ -1,5 +1,5 @@
 {
-  "version": "0.9.121",
+  "version": "0.9.123",
   "mqtt": {
     "client_id": "edge_analytics",
     "port": 1883,
@@ -26,7 +26,12 @@
       "id": "steam_detection"
     },
     {
-      "active": false,
+      "active": true,
+      "config": "config/scenario_fire_smoke_detection.json",
+      "id": "fire_smoke_detection"
+    },
+    {
+      "active": true,
       "config": "config/scenario_coal_powder_detection.json",
       "id": "coal_powder_detection"
     },
