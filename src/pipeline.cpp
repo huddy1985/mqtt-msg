@@ -17,6 +17,7 @@
 #include "app/cnn.hpp"
 #include "app/yolo.hpp"
 #include "app/pipeline.hpp"
+#include "app/common.hpp"
 
 namespace app {
 namespace {
@@ -134,13 +135,42 @@ std::string saveFrameToDisk(const std::filesystem::path& directory,
 
     std::ostringstream name;
     name << "frame_" << std::setw(6) << std::setfill('0') << index;
+    std::string format = frame.format;
+    std::string format_lower;
+    format_lower.resize(format.size());
+    std::transform(format.begin(), format.end(), format_lower.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+
     std::string extension = ".jpg";
-    if (!frame.format.empty()) {
-        if (frame.format == "png") {
-            extension = ".png";
-        } else if (frame.format == "jpeg" || frame.format == "jpg") {
-            extension = ".jpg";
+    std::vector<std::uint8_t> bytes;
+
+    if (format_lower == "png") {
+        extension = ".png";
+        bytes = frame.data;
+    } else if (format_lower == "jpeg" || format_lower == "jpg") {
+        extension = ".jpg";
+        bytes = frame.data;
+    } else {
+        cv::Mat image;
+        try {
+            image = decodeFrameToMat(frame);
+        } catch (...) {
+            return {};
         }
+        if (image.empty()) {
+            return {};
+        }
+
+        std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, 90};
+        if (!cv::imencode(".jpg", image, bytes, params)) {
+            return {};
+        }
+        extension = ".jpg";
+    }
+
+    if (bytes.empty()) {
+        return {};
     }
 
     std::filesystem::path filePath = directory / (name.str() + extension);
@@ -148,7 +178,7 @@ std::string saveFrameToDisk(const std::filesystem::path& directory,
     if (!output) {
         return {};
     }
-    output.write(reinterpret_cast<const char*>(frame.data.data()), static_cast<std::streamsize>(frame.data.size()));
+    output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     output.close();
     return filePath.generic_string();
 }

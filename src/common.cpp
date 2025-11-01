@@ -1,12 +1,15 @@
 #include "app/common.hpp"
 #include "app/rtsp.hpp"
 
+#include <algorithm>
+#include <cctype>
+
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <sys/ioctl.h>
 #include <arpa/inet.h>
-#include <unistd.h> 
+#include <unistd.h>
 
 namespace app {
 
@@ -160,13 +163,69 @@ PreprocessInfo preprocess_letterbox(const cv::Mat& img, int input_w, int input_h
 
 cv::Mat decodeFrameToMat(const CapturedFrame& frame)
 {
-    cv::Mat encoded(1, frame.data.size(), CV_8UC1, const_cast<uint8_t*>(frame.data.data()));
-
-    cv::Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR);
-    if (image.empty()) {
-        throw std::runtime_error("Failed to decode JPEG frame");
+    if (frame.data.empty()) {
+        throw std::runtime_error("Captured frame has no data");
     }
-    return image;
+
+    auto toLower = [](std::string fmt) {
+        std::transform(fmt.begin(), fmt.end(), fmt.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return fmt;
+    };
+
+    std::string format = toLower(frame.format);
+    if (format.empty()) {
+        format = "jpeg";
+    }
+
+    if (format == "jpeg" || format == "jpg" || format == "png") {
+        cv::Mat encoded(1, static_cast<int>(frame.data.size()), CV_8UC1,
+                        const_cast<uint8_t*>(frame.data.data()));
+        cv::Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR);
+        if (image.empty()) {
+            throw std::runtime_error("Failed to decode encoded frame");
+        }
+        return image;
+    }
+
+    if ((format == "bgr" || format == "bgr24")) {
+        if (frame.width <= 0 || frame.height <= 0) {
+            throw std::runtime_error("Captured BGR frame missing dimensions");
+        }
+        cv::Mat image(frame.height, frame.width, CV_8UC3,
+                      const_cast<uint8_t*>(frame.data.data()));
+        return image.clone();
+    }
+
+    if (format == "nv12") {
+        if (frame.width <= 0 || frame.height <= 0) {
+            throw std::runtime_error("Captured NV12 frame missing dimensions");
+        }
+        const int y_stride = frame.stride > 0 ? frame.stride : frame.width;
+        const int uv_stride = frame.uv_stride > 0 ? frame.uv_stride : frame.width;
+        const std::size_t expected = static_cast<std::size_t>(y_stride) * frame.height +
+                                     static_cast<std::size_t>(uv_stride) * (frame.height / 2);
+        if (frame.data.size() < expected) {
+            throw std::runtime_error("Captured NV12 frame data too small");
+        }
+
+        const uint8_t* y_ptr = frame.data.data();
+        const uint8_t* uv_ptr = y_ptr + static_cast<std::size_t>(y_stride) * frame.height;
+
+        cv::Mat y_plane(frame.height, y_stride, CV_8UC1, const_cast<uint8_t*>(y_ptr));
+        cv::Mat uv_plane(frame.height / 2, uv_stride / 2, CV_8UC2,
+                         const_cast<uint8_t*>(uv_ptr));
+
+        cv::Mat cropped_y = y_plane(cv::Rect(0, 0, frame.width, frame.height));
+        cv::Mat cropped_uv = uv_plane(cv::Rect(0, 0, frame.width / 2, frame.height / 2));
+
+        cv::Mat bgr;
+        cv::cvtColorTwoPlane(cropped_y, cropped_uv, bgr, cv::COLOR_YUV2BGR_NV12);
+        return bgr;
+    }
+
+    throw std::runtime_error("Unsupported frame format: " + frame.format);
 }
 
 cv::Mat extractROI(const cv::Mat& image, int x, int y, int width, int height)

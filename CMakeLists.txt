@@ -46,6 +46,38 @@ if (ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIBRARY)
     target_link_libraries(InspectAI PRIVATE ${ONNXRUNTIME_LIBRARY})
 endif()
 
+find_path(RKNN_INCLUDE_DIR
+    NAMES rknn_api.h
+    HINTS $ENV{RKNN_ROOT} $ENV{RKNN_DIR} $ENV{RKNN_SDK_PATH}
+    PATH_SUFFIXES include)
+
+find_library(RKNN_LIBRARY
+    NAMES rknn_api rknn2
+    HINTS $ENV{RKNN_ROOT} $ENV{RKNN_DIR} $ENV{RKNN_SDK_PATH}
+    PATH_SUFFIXES lib lib64)
+
+if (RKNN_INCLUDE_DIR AND RKNN_LIBRARY)
+    target_compile_definitions(InspectAI PRIVATE APP_HAS_RKNN)
+    target_include_directories(InspectAI PRIVATE ${RKNN_INCLUDE_DIR})
+    target_link_libraries(InspectAI PRIVATE ${RKNN_LIBRARY})
+endif()
+
+find_path(RKMPP_INCLUDE_DIR
+    NAMES rk_mpi.h
+    HINTS $ENV{RKMPP_ROOT} $ENV{ROCKCHIP_MPP_ROOT}
+    PATH_SUFFIXES include)
+
+find_library(RKMPP_LIBRARY
+    NAMES rockchip_mpp mpp
+    HINTS $ENV{RKMPP_ROOT} $ENV{ROCKCHIP_MPP_ROOT}
+    PATH_SUFFIXES lib lib64)
+
+if (RKMPP_INCLUDE_DIR AND RKMPP_LIBRARY)
+    target_compile_definitions(InspectAI PRIVATE APP_HAS_RKMPP)
+    target_include_directories(InspectAI PRIVATE ${RKMPP_INCLUDE_DIR})
+    target_link_libraries(InspectAI PRIVATE ${RKMPP_LIBRARY})
+endif()
+
 find_package(PkgConfig QUIET)
 if (PKG_CONFIG_FOUND)
     pkg_check_modules(MOSQUITTO QUIET libmosquitto)

@@ -14,6 +14,10 @@ struct CapturedFrame {
     double timestamp = 0.0;                 // seconds since capture start
     std::vector<std::uint8_t> data;         // encoded image bytes (JPEG)
     std::string format = "jpeg";           // image format identifier
+    int width = 0;                          // image width when decoded
+    int height = 0;                         // image height when decoded
+    int stride = 0;                         // luma stride for raw formats
+    int uv_stride = 0;                      // chroma stride for raw formats
 };
 
 class RtspFrameGrabber {
