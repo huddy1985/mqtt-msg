@@ -7,6 +7,7 @@
     "type": "cnn",
     "path": "models/cnn_haze.onnx"
   },
+  "fps": 15,
   "action": "enable",
   "mode": "continues",
   "detection_regions": [
@@ -26,6 +27,7 @@
     ]
   ],
   "confidence_threshold": 0.5,
+  "thread_pool_size": 8,
   "labels": [
     "ash_powder"
   ]

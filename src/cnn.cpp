@@ -1,5 +1,5 @@
-#include "app/cnn.hpp"
 
+#include <mutex>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -9,6 +9,8 @@
 #include <string>
 #include <iostream>
 #include <vector>
+
+#include "app/cnn.hpp"
 
 #ifdef APP_HAS_ONNXRUNTIME
 #include <onnxruntime_cxx_api.h>
@@ -162,63 +164,60 @@ std::vector<Detection> CnnModel::infer(const CapturedFrame& frame) const
         // 1) 解码 JPEG/PNG → BGR
         cv::Mat encoded(1, static_cast<int>(frame.data.size()), CV_8UC1,
                         const_cast<uint8_t*>(frame.data.data()));
-        cv::Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR);
 
-        Region rg;
-        /** only support one region now. */
-        if (config_.detection_regions.size() != 1) {
-            rg.x = 740;
-            rg.y = 420;
-            rg.width = 240;
-            rg.height = 240;
-        } else {
-            rg = config_.detection_regions[0];
+        static std::mutex imdecode_mutex;
+        cv::Mat image;
+        {
+            std::lock_guard<std::mutex> lk(imdecode_mutex);
+            image = cv::imdecode(encoded, cv::IMREAD_COLOR); // BGR
         }
-        cv::Mat ROI = extractROI(image, rg.x, rg.y, rg.width, rg.height);
-
-        #ifdef _DEBUG_
-        cv::Mat vis = ROI.clone();
-        std::ostringstream oss;
-        oss << "/tmp/debug_frame_" << frame.timestamp << ".jpg";
-        cv::imwrite(oss.str(), vis);
-        std::cout << "[DEBUG] Saved debug frame: " << oss.str()
-                    << "  (" << vis.cols << "x" << vis.rows << ")" << std::endl;
-        #endif
 
         if (image.empty()) {
             std::cerr << "[CNN] Failed to decode image.\n";
             return predictions;
         }
 
-        // 2) resize 到模型输入大小 (128x128)
+        // 2) 提取 ROI（若配置无效则使用默认）
+        Region rg;
+        if (config_.detection_regions.size() != 1) {
+            rg = {740, 420, 240, 240};
+        } else {
+            rg = config_.detection_regions[0];
+        }
+        cv::Mat ROI = extractROI(image, rg.x, rg.y, rg.width, rg.height);
+        if (ROI.empty()) {
+            std::cerr << "[CNN] ROI extraction failed.\n";
+            return predictions;
+        }
+
+        // 3) resize 到模型输入大小 (128x128)
         const int target_h = static_cast<int>(impl_->input_shape[2]);
         const int target_w = static_cast<int>(impl_->input_shape[3]);
         cv::Mat resized;
         cv::resize(ROI, resized, cv::Size(target_w, target_h), 0, 0, cv::INTER_LINEAR);
 
-        // 3) BGR → RGB
+        // 4) BGR → RGB
         cv::Mat rgb;
         cv::cvtColor(resized, rgb, cv::COLOR_BGR2RGB);
 
-        // 4) float32 / 255.0
+        // 5) 转 float32, 归一化到 [0,1]
         rgb.convertTo(rgb, CV_32F, 1.0f / 255.0f);
 
-        // 5) Normalize (x-0.5)/0.5 = x*2 - 1   <-- 与 python 保持一致
+        // 6) Normalize: (x - 0.5) / 0.5 = x * 2 - 1
         rgb = rgb * 2.0f - 1.0f;
 
-        // 6) HWC -> CHW  填充输入 tensor
+        // 7) HWC → CHW
+        std::vector<cv::Mat> channels(3);
+        cv::split(rgb, channels);
         std::vector<float> input_tensor(1 * 3 * target_h * target_w);
         size_t channel_size = static_cast<size_t>(target_h * target_w);
-        std::vector<cv::Mat> chw(3);
-        cv::split(rgb, chw);
-
         for (int c = 0; c < 3; ++c) {
             std::memcpy(input_tensor.data() + c * channel_size,
-                        chw[c].ptr<float>(),
+                        channels[c].ptr<float>(),
                         channel_size * sizeof(float));
         }
 
-        // 7) 创建 ORT Tensor
+        // 8) 创建 ORT Tensor
         Ort::MemoryInfo mem_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
         Ort::Value input = Ort::Value::CreateTensor<float>(
             mem_info,
@@ -228,7 +227,7 @@ std::vector<Detection> CnnModel::infer(const CapturedFrame& frame) const
             impl_->input_shape.size()
         );
 
-        // 8) 执行推理
+        // 9) 执行推理
         auto outputs = impl_->session->Run(
             Ort::RunOptions{},
             impl_->input_name_ptrs.data(),
@@ -238,34 +237,29 @@ std::vector<Detection> CnnModel::infer(const CapturedFrame& frame) const
             impl_->output_name_ptrs.size()
         );
 
-        // 9) 解析输出 -> [1,2] 概率
+        // 10) 解析输出 -> [1, 2] 概率
         const float* out = outputs[0].GetTensorData<float>();
         float prob_clear = out[0];
-        float prob_hazy  = out[1];  // python: output.squeeze() > threshold → hazy
+        float prob_hazy  = out[1];
 
         Detection d;
-
-        #ifdef _DEBUG_
-        std::cout << "threshold: " << config_.threshold << std::endl;
-        #endif
         if (prob_hazy > config_.threshold) {
-            
-            d.label = config_.labels[0];
+            d.label = config_.labels[0];  // hazy
             d.confidence = prob_hazy;
-            predictions.push_back(std::move(d));
         } else {
             d.label = "clear";
             d.confidence = prob_clear;
-            predictions.push_back(std::move(d));
         }
+        predictions.push_back(std::move(d));
 
         return predictions;
-    } catch (const std::exception& ex) {
+    }
+    catch (const std::exception& ex) {
         std::cerr << "[CNN] exception: " << ex.what() << '\n';
         predictions.clear();
     }
 
-    // fallback（仅当异常出现时启用 fingerprint）
+    // fallback（异常时 fingerprint）
     if (predictions.empty()) {
         std::uint64_t hash = fingerprint(frame.data);
         Detection d;

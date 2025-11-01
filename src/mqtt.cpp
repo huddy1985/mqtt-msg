@@ -112,7 +112,7 @@ struct MqttService::Impl {
                             ).count();
 
                     obj["timestamp"] = std::to_string(ts);
-                    obj["macAddress"] = detectLocalMac();
+                    obj["macAddress"] = config.mqtt.mac_addr;
                     obj["version"] = version;
                     publishJson(heartbeat, topic);
                 } catch (const std::exception& ex) {

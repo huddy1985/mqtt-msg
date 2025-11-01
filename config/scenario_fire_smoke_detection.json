@@ -1,0 +1,33 @@
+{
+  "scenario_id": "fire_smoke_detection",
+  "name": "Fire smoke detection",
+  "description": "Detects fire and smoke dispersion using a YOLOv11 object detector.",
+  "model": {
+    "id": "yolo_11",
+    "type": "yolo",
+    "path": "models/smoke.onnx"
+  },
+  "fps": 15,
+  "action": "enable",
+  "mode": "continues",
+  "detection_regions": [
+    [
+      0,
+      0,
+      1920,
+      1080
+    ]
+  ],
+  "filter_regions": [
+    [
+      100,
+      100,
+      400,
+      400
+    ]
+  ],
+  "confidence_threshold": 0.5,
+  "labels": [
+    "fire", "default", "smoke"
+  ]
+}

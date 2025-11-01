@@ -8,6 +8,7 @@
 #include "app/config.hpp"
 #include "app/rtsp.hpp"
 #include "app/scenario.hpp"
+#include "app/thread_pool.hpp"
 
 namespace app {
 
@@ -52,6 +53,7 @@ private:
     ConfigStore *store_{nullptr};
     mutable std::shared_mutex scenarios_mutex_;
     std::map<std::string, std::shared_ptr<Scenario>> active_scenarios_;
+    app::ThreadPool thread_pool_;
 };
 
 }  // namespace app

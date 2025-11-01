@@ -83,13 +83,13 @@ AppConfig loadConfig(const std::string& path) {
     const auto& mqtt = root.at("mqtt");
     config.mqtt.server = mqtt.getString("server");
     config.mqtt.port = static_cast<int>(mqtt.getNumber("port"));
+    config.mqtt.mac_addr = detectLocalMac();
 
     /** here we add MAC address tricklly **/
-    std::string mac_address = detectLocalMac();
-    std::string with_mac_cliend_id = mqtt.getString("client_id") + "_" + mac_address;
+    std::string with_mac_cliend_id = mqtt.getString("client_id") + "_" + config.mqtt.mac_addr;
     config.mqtt.client_id = with_mac_cliend_id;
 
-    std::string with_mac_commands = mqtt.getString("subscribe_topic") + mac_address;
+    std::string with_mac_commands = mqtt.getString("subscribe_topic") + config.mqtt.mac_addr;
     config.mqtt.subscribe_topic = with_mac_commands;
 
     config.mqtt.publish_topic = mqtt.getString("publish_topic");
@@ -115,6 +115,12 @@ AppConfig loadConfig(const std::string& path) {
     if (!root.contains("scenarios")) {
         throw std::runtime_error("Configuration missing 'scenarios' section");
     }
+
+    if (root.contains("thread_pool_size")) {
+        config.thread_pool_size = root.getNumber("thread_pool_size");
+        std::cout << "multi-thread: " << config.thread_pool_size << std::endl;
+    }
+
     const auto& scenarios = root.at("scenarios").asArray();
     for (const auto& scenario : scenarios) {
         ScenarioConfig entry = parseScenario(scenario, baseDir);
@@ -162,11 +168,8 @@ MqttConfig parse_mqtt_config(const simplejson::JsonValue &node) {
     }
 
     if (node.contains("subscribe_topic")) {
-        std::string mac_addr = detectLocalMac();
         std::string subscribe_tpoic = node["subscribe_topic"].asString();
-        std::cout << "subs topic: " << subscribe_tpoic + mac_addr << std::endl;
-
-        config.subscribe_topic = subscribe_tpoic + mac_addr;
+        config.subscribe_topic = subscribe_tpoic;
     }
 
     if (node.contains("heartbeat_topic")) {

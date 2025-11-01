@@ -30,6 +30,7 @@ struct RtspConfig {
 };
 
 struct MqttConfig {
+    std::string mac_addr;
     std::string server;
     int port = 0;
 
@@ -71,6 +72,7 @@ struct ScenarioDefinition {
 struct AppConfig {
     std::string version;
     std::string source_path;
+
     MqttConfig mqtt;
     RtspConfig rtsp;
     ServiceInfo service;
@@ -79,6 +81,8 @@ struct AppConfig {
     
     std::map<std::string, std::string> scenario_files;
     std::vector<std::string> active_scenarios;
+
+    int thread_pool_size;
 };
 
 AppConfig loadConfig(const std::string& path);

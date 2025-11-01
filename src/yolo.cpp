@@ -1,5 +1,4 @@
-#include "app/yolo.hpp"
-
+#include <mutex>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -11,6 +10,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "app/yolo.hpp"
 
 #ifdef APP_HAS_ONNXRUNTIME
 #include <onnxruntime_cxx_api.h>
@@ -221,7 +222,14 @@ std::vector<Detection> YoloModel::infer(const CapturedFrame& frame) const
             // ============ 1. 构造输入张量 ============
             cv::Mat encoded(1, static_cast<int>(frame.data.size()), CV_8UC1,
                             const_cast<uint8_t*>(frame.data.data()));
-            cv::Mat image = cv::imdecode(encoded, cv::IMREAD_COLOR); // BGR
+            
+            static std::mutex imdecode_mutex;
+            cv::Mat image;
+            {
+                std::lock_guard<std::mutex> lk(imdecode_mutex);
+                image = cv::imdecode(encoded, cv::IMREAD_COLOR); // BGR
+            }
+            
             if (image.empty()) {
                 std::cerr << "Failed to decode image" << std::endl;
                 return detections;
